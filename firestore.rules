@@ -1,0 +1,120 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Schema Validation Helpers
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['updatedAt'])
+        && (data.displayName == null || (data.displayName is string && data.displayName.size() <= 100))
+        && (data.email == null || (data.email is string && data.email.size() <= 150))
+        && (data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 500))
+        && data.updatedAt is string;
+    }
+
+    function isValidPlayer(data, userId) {
+      return data.keys().hasAll(['id', 'name', 'color', 'userId', 'updatedAt'])
+        && data.id is string && data.id.size() <= 64
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 50
+        && data.color is string && data.color.size() <= 50
+        && (data.avatar == null || (data.avatar is string && data.avatar.size() <= 20))
+        && data.userId == userId
+        && data.updatedAt is string;
+    }
+
+    function isValidGameHistory(data, userId) {
+      return data.keys().hasAll(['id', 'gameType', 'winner', 'date', 'userId', 'createdAt'])
+        && data.id is string && data.id.size() <= 64
+        && (data.gameType == 'farkle' || data.gameType == 'yahtzee' || data.gameType == 'dominoes')
+        && data.winner is string && data.winner.size() <= 100
+        && data.date is string && data.date.size() <= 100
+        && data.userId == userId
+        && data.createdAt is string;
+    }
+
+    function isValidSavedGame(data, userId) {
+      return data.keys().hasAll(['gameType', 'userId', 'updatedAt'])
+        && (data.gameType == 'farkle' || data.gameType == 'yahtzee' || data.gameType == 'dominoes')
+        && data.userId == userId
+        && data.updatedAt is string;
+    }
+
+    function isValidGameRoom(data) {
+      return data.keys().hasAll(['code', 'gameType', 'hostId', 'updatedAt'])
+        && data.code is string && data.code.size() <= 20
+        && (data.gameType == 'farkle' || data.gameType == 'yahtzee' || data.gameType == 'dominoes')
+        && data.hostId is string && data.hostId.size() <= 128
+        && (data.hostName == null || (data.hostName is string && data.hostName.size() <= 100))
+        && (data.lastActionBy == null || (data.lastActionBy is string && data.lastActionBy.size() <= 100))
+        && data.updatedAt is string;
+    }
+
+    // Live Game Rooms for Online Sync Across Devices
+    match /rooms/{roomId} {
+      allow get: if true;
+      allow create, update: if isValidId(roomId) && isValidGameRoom(incoming());
+      allow delete: if true;
+    }
+
+    // User Profile Document
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidUserProfile(incoming());
+      allow delete: if isOwner(userId);
+
+      // User Players Subcollection
+      match /players/{playerId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(playerId) && isValidPlayer(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(playerId) && isValidPlayer(incoming(), userId)
+          && incoming().userId == existing().userId;
+        allow delete: if isOwner(userId) && isValidId(playerId);
+      }
+
+      // User Game History Subcollection
+      match /gameHistory/{historyId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(historyId) && isValidGameHistory(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(historyId) && isValidGameHistory(incoming(), userId)
+          && incoming().userId == existing().userId;
+        allow delete: if isOwner(userId) && isValidId(historyId);
+      }
+
+      // User Saved Games Subcollection
+      match /savedGames/{gameType} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && (gameType == 'farkle' || gameType == 'yahtzee' || gameType == 'dominoes')
+          && isValidSavedGame(incoming(), userId);
+        allow update: if isOwner(userId) && (gameType == 'farkle' || gameType == 'yahtzee' || gameType == 'dominoes')
+          && isValidSavedGame(incoming(), userId)
+          && incoming().userId == existing().userId;
+        allow delete: if isOwner(userId) && (gameType == 'farkle' || gameType == 'yahtzee' || gameType == 'dominoes');
+      }
+    }
+  }
+}

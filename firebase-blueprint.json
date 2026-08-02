@@ -1,0 +1,207 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Profile information for the authenticated user.",
+      "type": "object",
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "updatedAt"
+      ]
+    },
+    "Player": {
+      "title": "Player",
+      "description": "A player saved in the scorekeeper application.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "color": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "color",
+        "userId",
+        "updatedAt"
+      ]
+    },
+    "GameHistoryEntry": {
+      "title": "Game History Entry",
+      "description": "Log of completed game matches.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "gameType": {
+          "type": "string",
+          "enum": [
+            "farkle",
+            "yahtzee",
+            "dominoes"
+          ]
+        },
+        "winner": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "gameType",
+        "winner",
+        "date",
+        "userId",
+        "createdAt"
+      ]
+    },
+    "SavedGame": {
+      "title": "Saved Game",
+      "description": "In-progress active game state for a player or match.",
+      "type": "object",
+      "properties": {
+        "gameType": {
+          "type": "string",
+          "enum": [
+            "farkle",
+            "yahtzee",
+            "dominoes"
+          ]
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "gameType",
+        "userId",
+        "updatedAt"
+      ]
+    },
+    "GameRoom": {
+      "title": "Game Room",
+      "description": "Live online multiplayer room for synchronized scoring across devices.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "gameType": {
+          "type": "string",
+          "enum": [
+            "farkle",
+            "yahtzee",
+            "dominoes"
+          ]
+        },
+        "hostId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "hostName": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "lastActionBy": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "gameType",
+        "hostId",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/rooms/{roomId}": {
+      "schema": {
+        "$ref": "#/entities/GameRoom"
+      },
+      "description": "Public live room data accessible by players who know the room code."
+    },
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "User profile document."
+    },
+    "/users/{userId}/players/{playerId}": {
+      "schema": {
+        "$ref": "#/entities/Player"
+      },
+      "description": "Players created and managed by the user."
+    },
+    "/users/{userId}/gameHistory/{historyId}": {
+      "schema": {
+        "$ref": "#/entities/GameHistoryEntry"
+      },
+      "description": "Match history records logged by the user."
+    },
+    "/users/{userId}/savedGames/{gameType}": {
+      "schema": {
+        "$ref": "#/entities/SavedGame"
+      },
+      "description": "Active in-progress saved game state for a specific game type."
+    }
+  }
+}
