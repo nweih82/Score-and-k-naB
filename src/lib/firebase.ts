@@ -3,11 +3,18 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInAnonymously,
+  updateProfile,
   signOut,
   User,
   onAuthStateChanged,
 } from 'firebase/auth';
 import {
+  initializeFirestore,
   getFirestore,
   doc,
   getDoc,
@@ -20,10 +27,12 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Player, GameHistoryEntry, SavedGameData, GameType, GameRoomData, ConnectedPlayer } from '../types';
+import { Player, GameHistoryEntry, SavedGameData, GameType, GameRoomData, ConnectedPlayer, HighScoreRecord } from '../types';
 
 export const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = initializeFirestore(app, {
+  experimentalAutoDetectLongPolling: true,
+}, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
@@ -80,33 +89,103 @@ export async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
-    }
+    console.warn('Firestore connection check notice:', error instanceof Error ? error.message : error);
   }
 }
 
 // Auth Helpers
+export async function syncUserProfile(user: User, customName?: string) {
+  const userRef = doc(db, 'users', user.uid);
+  const displayName = customName || user.displayName || user.email?.split('@')[0] || 'Player';
+  await setDoc(
+    userRef,
+    {
+      displayName,
+      email: user.email || '',
+      photoURL: user.photoURL || '',
+      updatedAt: new Date().toISOString(),
+    },
+    { merge: true }
+  );
+}
+
+export async function checkRedirectResultOnLoad(): Promise<User | null> {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result?.user) {
+      await syncUserProfile(result.user);
+      return result.user;
+    }
+  } catch (error) {
+    console.warn('Redirect Auth Error on Load:', error);
+  }
+  return null;
+}
+
 export async function loginWithGoogle() {
   try {
     const result = await signInWithPopup(auth, googleProvider);
     if (result.user) {
-      // Sync user profile
-      const userRef = doc(db, 'users', result.user.uid);
-      await setDoc(
-        userRef,
-        {
-          displayName: result.user.displayName || 'Player',
-          email: result.user.email || '',
-          photoURL: result.user.photoURL || '',
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      );
+      await syncUserProfile(result.user);
     }
     return result.user;
+  } catch (error: any) {
+    console.warn('Google Auth Popup failed/blocked, trying Redirect fallback:', error);
+    // If popup is blocked or disallowed in WebViews/APKs, attempt redirect sign in
+    if (
+      error?.code === 'auth/popup-blocked' ||
+      error?.code === 'auth/operation-not-supported-in-this-environment' ||
+      error?.code === 'auth/disallowed-webview' ||
+      error?.message?.includes('popup')
+    ) {
+      try {
+        await signInWithRedirect(auth, googleProvider);
+        return null; // Will redirect the browser/webview
+      } catch (redirectErr) {
+        console.error('Google Redirect Auth Error:', redirectErr);
+        throw redirectErr;
+      }
+    }
+    throw error;
+  }
+}
+
+export async function loginWithEmail(email: string, pass: string): Promise<User> {
+  try {
+    const cred = await signInWithEmailAndPassword(auth, email, pass);
+    if (cred.user) {
+      await syncUserProfile(cred.user);
+    }
+    return cred.user;
   } catch (error) {
-    console.error('Google Auth Error:', error);
+    console.error('Email Login Error:', error);
+    throw error;
+  }
+}
+
+export async function registerWithEmail(email: string, pass: string, displayName: string): Promise<User> {
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, email, pass);
+    if (cred.user) {
+      await updateProfile(cred.user, { displayName });
+      await syncUserProfile(cred.user, displayName);
+    }
+    return cred.user;
+  } catch (error) {
+    console.error('Email Register Error:', error);
+    throw error;
+  }
+}
+
+export async function loginAnonymously(): Promise<User> {
+  try {
+    const cred = await signInAnonymously(auth);
+    if (cred.user) {
+      await syncUserProfile(cred.user, 'Guest Player');
+    }
+    return cred.user;
+  } catch (error) {
+    console.error('Anonymous Auth Error:', error);
     throw error;
   }
 }
@@ -474,5 +553,55 @@ export async function leaveGameRoomInFirestore(code: string, deviceId: string) {
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+// Global Hall of Fame High Scores
+export function subscribeToHallOfFame(onUpdate: (records: HighScoreRecord[]) => void) {
+  const fameRef = collection(db, 'hallOfFame');
+  return onSnapshot(
+    fameRef,
+    snapshot => {
+      const records: HighScoreRecord[] = snapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        return {
+          id: data.id || docSnap.id,
+          playerName: data.playerName,
+          playerAvatar: data.playerAvatar,
+          playerColor: data.playerColor,
+          score: Number(data.score) || 0,
+          gameType: data.gameType as GameType,
+          date: data.date,
+          isWinner: !!data.isWinner,
+          createdAt: data.createdAt,
+        };
+      });
+      // Sort highest score first
+      records.sort((a, b) => b.score - a.score);
+      onUpdate(records);
+    },
+    error => {
+      console.warn('Hall of Fame real-time listener notice:', error);
+      onUpdate([]);
+    }
+  );
+}
+
+export async function saveHighScoreToHallOfFame(record: HighScoreRecord) {
+  const path = `hallOfFame/${record.id}`;
+  try {
+    await setDoc(doc(db, 'hallOfFame', record.id), {
+      id: record.id,
+      playerName: record.playerName,
+      playerAvatar: record.playerAvatar || '🎲',
+      playerColor: record.playerColor || 'bg-emerald-500',
+      score: record.score,
+      gameType: record.gameType,
+      date: record.date,
+      isWinner: !!record.isWinner,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 }

@@ -170,9 +170,62 @@
         "hostId",
         "updatedAt"
       ]
+    },
+    "HighScoreRecord": {
+      "title": "High Score Record",
+      "description": "Global hall of fame record for top scores.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "playerName": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "playerAvatar": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "score": {
+          "type": "number"
+        },
+        "gameType": {
+          "type": "string",
+          "enum": [
+            "farkle",
+            "yahtzee",
+            "dominoes"
+          ]
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "isWinner": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "playerName",
+        "score",
+        "gameType",
+        "date"
+      ]
     }
   },
   "firestore": {
+    "/hallOfFame/{recordId}": {
+      "schema": {
+        "$ref": "#/entities/HighScoreRecord"
+      },
+      "description": "Global hall of fame top score records."
+    },
     "/rooms/{roomId}": {
       "schema": {
         "$ref": "#/entities/GameRoom"

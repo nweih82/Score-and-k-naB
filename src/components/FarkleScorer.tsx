@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Player, FarkleState, FarkleRound } from '../types';
-import DiceFace from './DiceFace';
 import { Play, RotateCcw, Award, CheckCircle, Flame, AlertCircle, Plus, ChevronRight, Hash, Trash2, UserPlus, X, Edit2, Edit3, Save, Pencil, Undo } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, saveActiveGameToFirestore, deleteSavedGameFromFirestore } from '../lib/firebase';
 import { useSound } from '../lib/SoundContext';
+import VoiceCommandBar, { FarkleVoiceCommand } from './VoiceCommandBar';
 
 interface FarkleScorerProps {
   players: Player[];
@@ -46,7 +46,6 @@ export default function FarkleScorer({
     setGameState(previous);
     setTurnScore(0);
     setCustomScoreInput('');
-    setSelectedDiceIndices([]);
   };
 
   // Custom confirmation modals state
@@ -70,11 +69,6 @@ export default function FarkleScorer({
 
   const [editingRoundData, setEditingRoundData] = useState<{ roundIdx: number; playerId: string; playerName: string; currentRoundScore: number } | null>(null);
   const [manualRoundScoreVal, setManualRoundScoreVal] = useState<string>('');
-  
-  // Interactive dice analyzer state
-  // We have 6 dice that the user can set to input what they rolled
-  const [diceValues, setDiceValues] = useState<number[]>([1, 1, 1, 5, 2, 3]);
-  const [selectedDiceIndices, setSelectedDiceIndices] = useState<number[]>([]);
 
   // Automatically select all players by default
   useEffect(() => {
@@ -170,17 +164,17 @@ export default function FarkleScorer({
     setTurnScore(0);
     setCustomScoreInput('');
     setIsSettingUp(false);
-    setSelectedDiceIndices([]);
   };
 
-  const bankPoints = (amountToBank: number) => {
+  const bankPoints = (amountToBank: number, targetPlayerId?: string) => {
     if (!gameState) return;
     if (amountToBank <= 0) return;
 
     pushStateToHistory();
     playBank();
 
-    const { activePlayerId, scores, rounds, players: gamePlayers } = gameState;
+    const { activePlayerId: currentActiveId, scores, rounds, players: gamePlayers, targetScore, finalRoundState } = gameState;
+    const activePlayerId = targetPlayerId || currentActiveId;
     const currentScore = scores[activePlayerId] || 0;
     const newScore = currentScore + amountToBank;
 
@@ -191,7 +185,6 @@ export default function FarkleScorer({
     };
 
     // Log the round
-    // A round is complete when the last player banks or farkles
     const activeIndex = gamePlayers.findIndex(p => p.id === activePlayerId);
     let updatedRounds = [...rounds];
     
@@ -200,21 +193,79 @@ export default function FarkleScorer({
     if (!currentRoundObj) {
       currentRoundObj = { scores: {}, farkles: {} };
       updatedRounds.push(currentRoundObj);
+    } else {
+      currentRoundObj = {
+        scores: { ...currentRoundObj.scores },
+        farkles: { ...currentRoundObj.farkles },
+      };
+      updatedRounds[gameState.currentRound - 1] = currentRoundObj;
     }
     
     currentRoundObj.scores[activePlayerId] = amountToBank;
     currentRoundObj.farkles[activePlayerId] = false;
 
-    // Check if anyone has won
-    let newWinnerId = gameState.winnerId;
-    if (newScore >= gameState.targetScore) {
-      newWinnerId = activePlayerId;
+    let newFinalRoundState = finalRoundState ? { ...finalRoundState } : null;
+    let newWinnerId: string | null = null;
+
+    if (!newFinalRoundState) {
+      // Final round not active yet
+      if (newScore >= targetScore) {
+        if (gamePlayers.length === 1) {
+          // Single player: win immediately
+          newWinnerId = activePlayerId;
+        } else {
+          // Trigger Final Round ("Beat the Score")!
+          // Every other player gets 1 final turn in order to beat this score
+          const pending: string[] = [];
+          for (let i = 1; i < gamePlayers.length; i++) {
+            pending.push(gamePlayers[(activeIndex + i) % gamePlayers.length].id);
+          }
+          newFinalRoundState = {
+            leaderId: activePlayerId,
+            highScoreToBeat: newScore,
+            playersPendingTurn: pending,
+          };
+        }
+      }
+    } else {
+      // Final round IS already active
+      if (newScore > newFinalRoundState.highScoreToBeat) {
+        // Active player BEAT the high score! They take the lead!
+        // All other players get another chance to beat this new high score!
+        const newPending: string[] = [];
+        for (let i = 1; i < gamePlayers.length; i++) {
+          newPending.push(gamePlayers[(activeIndex + i) % gamePlayers.length].id);
+        }
+        newFinalRoundState = {
+          leaderId: activePlayerId,
+          highScoreToBeat: newScore,
+          playersPendingTurn: newPending,
+        };
+      } else {
+        // Did not beat the score. Remove active player from pending list
+        const remainingPending = newFinalRoundState.playersPendingTurn.filter(id => id !== activePlayerId);
+        if (remainingPending.length === 0) {
+          // All other players had their final turn and nobody beat the high score!
+          newWinnerId = newFinalRoundState.leaderId;
+          newFinalRoundState = null;
+        } else {
+          newFinalRoundState.playersPendingTurn = remainingPending;
+        }
+      }
     }
 
     // Determine next player
-    const nextIndex = (activeIndex + 1) % gamePlayers.length;
-    const nextPlayerId = gamePlayers[nextIndex].id;
-    const isNewRound = nextIndex === 0;
+    let nextPlayerId = activePlayerId;
+    if (!newWinnerId) {
+      if (newFinalRoundState && newFinalRoundState.playersPendingTurn.length > 0) {
+        nextPlayerId = newFinalRoundState.playersPendingTurn[0];
+      } else {
+        const nextIndex = (activeIndex + 1) % gamePlayers.length;
+        nextPlayerId = gamePlayers[nextIndex].id;
+      }
+    }
+
+    const isNewRound = (activeIndex + 1) % gamePlayers.length === 0;
     const nextRound = isNewRound ? gameState.currentRound + 1 : gameState.currentRound;
 
     setGameState(prev => {
@@ -226,11 +277,11 @@ export default function FarkleScorer({
         currentRound: nextRound,
         activePlayerId: nextPlayerId,
         winnerId: newWinnerId,
+        finalRoundState: newFinalRoundState,
       };
     });
 
-    // If game has a winner and it's the end of a round (or direct win), handle game finish
-    if (newWinnerId && (isNewRound || gamePlayers.length === 1)) {
+    if (newWinnerId) {
       const winner = gamePlayers.find(p => p.id === newWinnerId);
       if (winner) {
         localStorage.removeItem('scorekeeper_saved_farkle');
@@ -240,18 +291,18 @@ export default function FarkleScorer({
 
     setTurnScore(0);
     setCustomScoreInput('');
-    setSelectedDiceIndices([]);
   };
 
   const handleBank = () => {
     bankPoints(turnScore);
   };
 
-  const handleFarkle = () => {
+  const handleFarkle = (targetPlayerId?: string) => {
     if (!gameState) return;
     pushStateToHistory();
     playFarkle();
-    const { activePlayerId, rounds, players: gamePlayers } = gameState;
+    const { activePlayerId: currentActiveId, rounds, players: gamePlayers, finalRoundState } = gameState;
+    const activePlayerId = targetPlayerId || currentActiveId;
     const activeIndex = gamePlayers.findIndex(p => p.id === activePlayerId);
 
     // Record 0 points and Farkle
@@ -264,9 +315,31 @@ export default function FarkleScorer({
     currentRoundObj.scores[activePlayerId] = 0;
     currentRoundObj.farkles[activePlayerId] = true;
 
-    const nextIndex = (activeIndex + 1) % gamePlayers.length;
-    const nextPlayerId = gamePlayers[nextIndex].id;
-    const isNewRound = nextIndex === 0;
+    let newFinalRoundState = finalRoundState ? { ...finalRoundState } : null;
+    let newWinnerId: string | null = null;
+
+    if (newFinalRoundState) {
+      const remainingPending = newFinalRoundState.playersPendingTurn.filter(id => id !== activePlayerId);
+      if (remainingPending.length === 0) {
+        // Everyone had their turn and nobody beat the high score!
+        newWinnerId = newFinalRoundState.leaderId;
+        newFinalRoundState = null;
+      } else {
+        newFinalRoundState.playersPendingTurn = remainingPending;
+      }
+    }
+
+    let nextPlayerId = activePlayerId;
+    if (!newWinnerId) {
+      if (newFinalRoundState && newFinalRoundState.playersPendingTurn.length > 0) {
+        nextPlayerId = newFinalRoundState.playersPendingTurn[0];
+      } else {
+        const nextIndex = (activeIndex + 1) % gamePlayers.length;
+        nextPlayerId = gamePlayers[nextIndex].id;
+      }
+    }
+
+    const isNewRound = (activeIndex + 1) % gamePlayers.length === 0;
     const nextRound = isNewRound ? gameState.currentRound + 1 : gameState.currentRound;
 
     setGameState(prev => {
@@ -276,12 +349,21 @@ export default function FarkleScorer({
         rounds: updatedRounds,
         currentRound: nextRound,
         activePlayerId: nextPlayerId,
+        winnerId: newWinnerId,
+        finalRoundState: newFinalRoundState,
       };
     });
 
+    if (newWinnerId) {
+      const winner = gamePlayers.find(p => p.id === newWinnerId);
+      if (winner) {
+        localStorage.removeItem('scorekeeper_saved_farkle');
+        onGameFinished(winner.name, gameState.scores);
+      }
+    }
+
     setTurnScore(0);
     setCustomScoreInput('');
-    setSelectedDiceIndices([]);
   };
 
   const addCustomPoints = (points: number) => {
@@ -376,155 +458,6 @@ export default function FarkleScorer({
     setEditingRoundData(null);
   };
 
-  const handleDiceClick = (index: number) => {
-    // Toggle selection
-    setSelectedDiceIndices(prev =>
-      prev.includes(index)
-        ? prev.filter(i => i !== index)
-        : [...prev, index]
-    );
-  };
-
-  const rollNewDice = () => {
-    // Randomize all 6 dice
-    setDiceValues(diceValues.map(() => Math.floor(Math.random() * 6) + 1));
-    setSelectedDiceIndices([]);
-  };
-
-  const setSingleDiceValue = (index: number, newValue: number) => {
-    const updated = [...diceValues];
-    updated[index] = newValue;
-    setDiceValues(updated);
-  };
-
-  const cycleDiceValue = (index: number) => {
-    const updated = [...diceValues];
-    updated[index] = updated[index] === 6 ? 1 : updated[index] + 1;
-    setDiceValues(updated);
-  };
-
-  // Analyze SELECTED dice and calculate points based on the image rules
-  const calculateScoreFromSelectedDice = () => {
-    const selectedVals = selectedDiceIndices.map(i => diceValues[i]);
-    if (selectedVals.length === 0) return 0;
-
-    // Count occurrences
-    const counts: Record<number, number> = {};
-    for (let i = 1; i <= 6; i++) counts[i] = 0;
-    selectedVals.forEach(v => {
-      counts[v] = (counts[v] || 0) + 1;
-    });
-
-    let score = 0;
-    const totalSelected = selectedVals.length;
-
-    // Check for 6 of a Kind (3000)
-    const sixOfAKind = Object.keys(counts).find(k => counts[Number(k)] === 6);
-    if (sixOfAKind) {
-      return 3000;
-    }
-
-    // Check for 5 of a Kind (2000)
-    const fiveOfAKind = Object.keys(counts).find(k => counts[Number(k)] === 5);
-    if (fiveOfAKind) {
-      score += 2000;
-      // Remaining 1 dice
-      const remValue = Number(Object.keys(counts).find(k => counts[Number(k)] === 1));
-      if (remValue === 1) score += 100;
-      if (remValue === 5) score += 50;
-      return score;
-    }
-
-    // Check for 4 of a Kind with a Pair (1500)
-    const fourOfAKindVal = Object.keys(counts).find(k => counts[Number(k)] === 4);
-    const hasPairVal = Object.keys(counts).find(k => counts[Number(k)] === 2);
-    if (fourOfAKindVal && hasPairVal) {
-      return 1500;
-    }
-
-    // Check for 4 of a Kind (1000)
-    if (fourOfAKindVal) {
-      score += 1000;
-      // Remaining 2 dice
-      const remDice = Object.keys(counts).filter(k => counts[Number(k)] > 0 && Number(k) !== Number(fourOfAKindVal));
-      remDice.forEach(k => {
-        const val = Number(k);
-        const count = counts[val];
-        if (val === 1) score += count * 100;
-        if (val === 5) score += count * 50;
-      });
-      return score;
-    }
-
-    // Check for 1-6 Straight (1500)
-    const isStraight = Object.values(counts).every(c => c === 1);
-    if (isStraight && totalSelected === 6) {
-      return 1500;
-    }
-
-    // Check for 3 Pairs (1500)
-    const pairsCount = Object.values(counts).filter(c => c === 2).length;
-    if (pairsCount === 3 && totalSelected === 6) {
-      return 1500;
-    }
-
-    // Check for 2 Triplets (2500)
-    const tripletsCount = Object.values(counts).filter(c => c === 3).length;
-    if (tripletsCount === 2 && totalSelected === 6) {
-      return 2500;
-    }
-
-    // Check individual Triplets (Aces=300, Twos=200, Threes=300, Fours=400, Fives=500, Sixes=600)
-    // IMPORTANT: According to the image, Three 1s = 300, Three 3s = 300!
-    // The image says:
-    // [1][1][1] = 300
-    // [2][2][2] = 200
-    // [3][3][3] = 300
-    // [4][4][4] = 400
-    // [5][5][5] = 500
-    // [6][6][6] = 600
-    let hasTriplet = false;
-    for (let d = 1; d <= 6; d++) {
-      if (counts[d] >= 3) {
-        hasTriplet = true;
-        if (d === 1) score += 300;
-        else if (d === 2) score += 200;
-        else if (d === 3) score += 300;
-        else if (d === 4) score += 400;
-        else if (d === 5) score += 500;
-        else if (d === 6) score += 600;
-
-        // Add remaining single 1s or 5s (if there's a 4th or 5th, but we already handled 4/5/6 of a kind above)
-        // Wait, what if they selected less than 4, like exactly 3 dice? Yes.
-        // What if they had a triplet and some other singles?
-        const remCount = counts[d] - 3;
-        if (remCount > 0) {
-          if (d === 1) score += remCount * 100;
-          if (d === 5) score += remCount * 50;
-        }
-      }
-    }
-
-    // If no triplet, count individual 1s and 5s
-    for (let d = 1; d <= 6; d++) {
-      if (counts[d] < 3) {
-        if (d === 1) score += counts[d] * 100;
-        if (d === 5) score += counts[d] * 50;
-      }
-    }
-
-    return score;
-  };
-
-  const computedPoints = calculateScoreFromSelectedDice();
-
-  const addComputedPoints = () => {
-    if (computedPoints > 0) {
-      addCustomPoints(computedPoints);
-      setSelectedDiceIndices([]);
-    }
-  };
-
   // Reset Game Helper
   const resetGame = () => {
     setShowResetConfirm(true);
@@ -556,7 +489,6 @@ export default function FarkleScorer({
       const nextPlayer = remainingPlayers[removedIdx % remainingPlayers.length];
       newActivePlayerId = nextPlayer.id;
       setTurnScore(0);
-      setSelectedDiceIndices([]);
     }
 
     setGameState({
@@ -754,8 +686,150 @@ export default function FarkleScorer({
   const activePlayer = gameState.players.find(p => p.id === gameState.activePlayerId)!;
   const winner = gameState.winnerId ? gameState.players.find(p => p.id === gameState.winnerId) : null;
 
+  const handleVoiceCommand = (cmd: FarkleVoiceCommand): boolean => {
+    if (!gameState) return false;
+
+    let targetPlayerId = gameState.activePlayerId;
+    if (cmd.playerName) {
+      const cleanCmdName = cmd.playerName.toLowerCase().replace(/'s$/, '').replace(/[^a-z0-9]/g, '').trim();
+      const found = gameState.players.find(p => {
+        const pName = p.name.toLowerCase().replace(/'s$/, '').replace(/[^a-z0-9]/g, '').trim();
+        return pName === cleanCmdName || pName.startsWith(cleanCmdName) || cleanCmdName.startsWith(pName);
+      });
+      if (found) {
+        targetPlayerId = found.id;
+      }
+    }
+
+    if (cmd.type === 'ADD_POINTS') {
+      if (targetPlayerId !== gameState.activePlayerId) {
+        setGameState(prev => prev ? { ...prev, activePlayerId: targetPlayerId } : null);
+      }
+      setTurnScore(prev => prev + cmd.amount);
+      return true;
+    } else if (cmd.type === 'BANK') {
+      const amountToBank = cmd.amount !== undefined && cmd.amount > 0 ? cmd.amount : turnScore;
+      if (amountToBank > 0) {
+        bankPoints(amountToBank, targetPlayerId);
+        return true;
+      } else {
+        return false;
+      }
+    } else if (cmd.type === 'FARKLE') {
+      handleFarkle(targetPlayerId);
+      return true;
+    } else if (cmd.type === 'CLEAR_TURN') {
+      setTurnScore(0);
+      return true;
+    } else if (cmd.type === 'UNDO') {
+      handleUndo();
+      return true;
+    } else if (cmd.type === 'SELECT_PLAYER') {
+      if (targetPlayerId) {
+        setGameState(prev => prev ? { ...prev, activePlayerId: targetPlayerId } : null);
+        return true;
+      }
+    }
+    return false;
+  };
+
   return (
     <div className="space-y-6">
+      {/* Voice Command Bar */}
+      <VoiceCommandBar
+        gameType="farkle"
+        activePlayerName={activePlayer.name}
+        playerNames={gameState.players.map(p => p.name)}
+        onFarkleCommand={handleVoiceCommand}
+      />
+
+      {/* Final Round "Beat the Score" Banner */}
+      {gameState.finalRoundState && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.98, y: -10 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          className="bg-gradient-to-r from-amber-600 via-orange-600 to-red-600 text-white rounded-[32px] p-5 sm:p-6 shadow-xl border-2 border-amber-300/40 relative overflow-hidden"
+        >
+          <div className="absolute -right-8 -bottom-8 w-36 h-36 bg-yellow-300/20 rounded-full blur-2xl pointer-events-none" />
+
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative z-10">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="bg-yellow-400 text-slate-950 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full flex items-center gap-1 shadow-sm">
+                  <Flame className="w-3.5 h-3.5 fill-current text-red-600 animate-pulse" />
+                  Final Round - Beat The Score!
+                </span>
+                <span className="text-xs text-amber-100 font-bold">
+                  Target: {gameState.targetScore.toLocaleString()} pts
+                </span>
+              </div>
+
+              {(() => {
+                const leader = gameState.players.find(p => p.id === gameState.finalRoundState!.leaderId);
+                const isCurrentLeader = gameState.activePlayerId === gameState.finalRoundState!.leaderId;
+                const activePlayerCurrentScore = (gameState.scores[gameState.activePlayerId] || 0) + turnScore;
+                const pointsNeeded = Math.max(1, gameState.finalRoundState!.highScoreToBeat - activePlayerCurrentScore + 1);
+
+                return (
+                  <div>
+                    <h3 className="text-lg sm:text-xl font-black uppercase tracking-tight flex flex-wrap items-center gap-2">
+                      <span>👑 Score to Beat:</span>
+                      <span className="text-yellow-300 font-black">{leader?.name} ({gameState.finalRoundState!.highScoreToBeat.toLocaleString()} pts)</span>
+                    </h3>
+                    <p className="text-xs font-bold text-amber-100 mt-1">
+                      {isCurrentLeader ? (
+                        <span className="text-yellow-200 bg-black/20 px-2.5 py-1 rounded-lg inline-block border border-yellow-300/30">
+                          ⭐ You hold the high score! Waiting for remaining players to take their turn...
+                        </span>
+                      ) : (
+                        <span className="bg-black/20 px-2.5 py-1 rounded-lg inline-block border border-yellow-300/30">
+                          🎯 <strong className="text-yellow-300">{activePlayer.name}</strong> needs <strong className="text-yellow-300 font-mono text-sm">{pointsNeeded.toLocaleString()} pts</strong> on this turn to take the lead!
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="bg-black/30 border border-white/20 rounded-2xl p-3.5 text-left md:text-right w-full md:w-auto shrink-0">
+              <span className="text-[9px] uppercase tracking-widest text-amber-200 font-black block mb-1.5">
+                Final Turns Remaining ({gameState.finalRoundState.playersPendingTurn.length}):
+              </span>
+              <div className="flex flex-wrap gap-1.5 justify-start md:justify-end">
+                {gameState.players.map(p => {
+                  const isLeader = p.id === gameState.finalRoundState!.leaderId;
+                  const isPending = gameState.finalRoundState!.playersPendingTurn.includes(p.id);
+                  const isCurrent = p.id === gameState.activePlayerId;
+
+                  if (isLeader) {
+                    return (
+                      <span key={p.id} className="text-[10px] font-black bg-yellow-400 text-slate-950 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                        👑 {p.name}
+                      </span>
+                    );
+                  }
+                  return (
+                    <span
+                      key={p.id}
+                      className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1 transition-all ${
+                        isPending
+                          ? isCurrent
+                            ? 'bg-orange-500 text-white font-black ring-2 ring-yellow-300 scale-105'
+                            : 'bg-white/20 text-white'
+                          : 'bg-black/30 text-amber-200/50 line-through'
+                      }`}
+                    >
+                      {p.name} {isPending ? '⏳' : '✓'}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
       {/* Turn Banner */}
       <div className="bg-teal-600 text-white rounded-[32px] p-6 shadow-lg border-2 border-teal-500/20 relative overflow-hidden">
         {/* Decorative background element */}
@@ -857,9 +931,9 @@ export default function FarkleScorer({
       </div>
 
       {/* Main Scorer Interface */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 landscape:grid-cols-12 md:grid-cols-12 gap-6">
         {/* Left: Active Controls & Interactive Scorer */}
-        <div className="lg:col-span-8 space-y-6">
+        <div className="landscape:col-span-7 md:col-span-7 lg:col-span-8 space-y-4 sm:space-y-6">
           {/* Scorer Controls & Quick Adder */}
           <div className="bg-white rounded-[32px] shadow-sm border-2 border-orange-100 p-6 space-y-6">
             <div>
@@ -943,142 +1017,10 @@ export default function FarkleScorer({
               </form>
             </div>
           </div>
-
-          {/* Interactive Dice Analyzer */}
-          <div className="bg-white dark:bg-slate-900 rounded-[32px] shadow-sm border-2 border-orange-100 dark:border-slate-800 p-6 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-[10px] font-black text-teal-800 dark:text-teal-400 uppercase tracking-widest">
-                  Interactive Roll Analyzer
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Click die face or pick numbers (1–6) to set roll. Select scoring dice to calculate points.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    if (selectedDiceIndices.length === diceValues.length) {
-                      setSelectedDiceIndices([]);
-                    } else {
-                      setSelectedDiceIndices(diceValues.map((_, i) => i));
-                    }
-                  }}
-                  className="px-3 py-1.5 bg-orange-100/70 dark:bg-slate-800 hover:bg-orange-200 dark:hover:bg-slate-700 text-orange-950 dark:text-slate-200 rounded-full text-xs font-black transition-colors cursor-pointer uppercase tracking-wider"
-                >
-                  {selectedDiceIndices.length === diceValues.length ? 'Deselect All' : 'Select All'}
-                </button>
-                <button
-                  onClick={rollNewDice}
-                  className="px-4 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-full text-xs font-black flex items-center gap-1.5 cursor-pointer uppercase tracking-wider shadow-sm transition-colors"
-                >
-                  <Flame className="w-3.5 h-3.5 fill-current" />
-                  Roll 6 Random
-                </button>
-              </div>
-            </div>
-
-            {/* Dice Tray */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 py-4">
-              {diceValues.map((val, index) => {
-                const isSelected = selectedDiceIndices.includes(index);
-                return (
-                  <div
-                    key={index}
-                    className={`flex flex-col items-center p-3 rounded-2xl border-2 transition-all ${
-                      isSelected
-                        ? 'border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/20 ring-2 ring-emerald-500/20'
-                        : 'border-orange-100 dark:border-slate-800 bg-orange-50/20 dark:bg-slate-800/40'
-                    }`}
-                  >
-                    {/* Die Header & Face (Click to cycle) */}
-                    <div className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1.5">
-                      Die #{index + 1}
-                    </div>
-
-                    <div
-                      onClick={() => cycleDiceValue(index)}
-                      className="cursor-pointer group relative flex items-center justify-center transition-transform active:scale-95"
-                      title="Click to cycle die value (1-6)"
-                    >
-                      <DiceFace
-                        value={val}
-                        size="lg"
-                        active={isSelected}
-                      />
-                      <div className="absolute inset-0 rounded-2xl bg-black/0 group-hover:bg-black/5 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-                        <span className="text-[9px] font-black bg-slate-900/80 text-white px-1.5 py-0.5 rounded shadow-xs">
-                          Cycle ↻
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Direct 1-6 Value Selector */}
-                    <div className="mt-3 w-full">
-                      <div className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider text-center mb-1">
-                        Set Value:
-                      </div>
-                      <div className="grid grid-cols-3 gap-1 w-full">
-                        {[1, 2, 3, 4, 5, 6].map((num) => {
-                          const isActive = val === num;
-                          return (
-                            <button
-                              key={num}
-                              onClick={() => setSingleDiceValue(index, num)}
-                              className={`py-1 rounded-lg text-xs font-mono font-black transition-all cursor-pointer ${
-                                isActive
-                                  ? 'bg-orange-500 text-white shadow-xs scale-105'
-                                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-orange-100 dark:hover:bg-slate-700'
-                              }`}
-                            >
-                              {num}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Score Selection Toggle Button */}
-                    <button
-                      onClick={() => handleDiceClick(index)}
-                      className={`mt-3 w-full py-1.5 px-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1 ${
-                        isSelected
-                          ? 'bg-emerald-600 text-white shadow-xs'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                      }`}
-                    >
-                      {isSelected ? '✓ Selected' : '+ Score'}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Calculated Points Panel */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-orange-50 dark:bg-slate-800/80 border border-orange-100 dark:border-slate-700 rounded-2xl">
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-black text-orange-950 dark:text-slate-200 uppercase tracking-wider">
-                  Selected ({selectedDiceIndices.length} dice):
-                </span>
-                <span className="font-mono text-xl font-black text-orange-600 dark:text-orange-400">
-                  {computedPoints} pts
-                </span>
-              </div>
-              <button
-                onClick={addComputedPoints}
-                disabled={computedPoints === 0}
-                className="w-full sm:w-auto px-6 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-black rounded-full text-xs flex items-center justify-center gap-1.5 shadow-sm cursor-pointer uppercase tracking-wider transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Add to Turn
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* Right: Leaderboard & Game State */}
-        <div className="lg:col-span-4 space-y-6">
+        <div className="landscape:col-span-5 md:col-span-5 lg:col-span-4 space-y-4 sm:space-y-6">
           {/* Standings */}
           <div className="bg-white rounded-[32px] shadow-sm border-2 border-orange-100 p-6">
             <h3 className="text-[10px] font-black text-teal-800 uppercase tracking-widest mb-4 flex items-center justify-between">
@@ -1113,49 +1055,69 @@ export default function FarkleScorer({
                   return (
                     <div
                       key={player.id}
-                      className={`p-3.5 rounded-2xl border-2 flex items-center justify-between transition-all ${
+                      className={`p-3.5 rounded-2xl border-2 flex flex-col gap-1 transition-all ${
                         isCurrent
                           ? 'border-orange-500 bg-orange-50/50 ring-2 ring-orange-500/20'
                           : 'border-orange-100/40 bg-orange-50/10'
                       }`}
                     >
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-xs font-black text-teal-800/60">#{idx + 1}</span>
-                        <div className={`w-6 h-6 rounded-full ${colorClass} ring-1 ring-black/10 flex items-center justify-center text-xs text-white font-bold shrink-0`}>
-                          {player.avatar || player.name.charAt(0).toUpperCase()}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-xs font-black text-teal-800/60">#{idx + 1}</span>
+                          <div className={`w-6 h-6 rounded-full ${colorClass} ring-1 ring-black/10 flex items-center justify-center text-xs text-white font-bold shrink-0`}>
+                            {player.avatar || player.name.charAt(0).toUpperCase()}
+                          </div>
+                          <span className="font-bold text-gray-700 text-sm uppercase tracking-tight truncate max-w-[100px] sm:max-w-[120px]">
+                            {player.name}
+                          </span>
                         </div>
-                        <span className="font-bold text-gray-700 text-sm uppercase tracking-tight truncate max-w-[100px] sm:max-w-[120px]">
-                          {player.name}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono font-bold text-teal-900 text-sm">
-                          {score.toLocaleString()}
-                        </span>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingScorePlayer({ id: player.id, name: player.name, currentScore: score });
-                            setManualScoreValue(score.toString());
-                          }}
-                          className="p-1 text-slate-400 hover:text-orange-600 rounded-lg hover:bg-orange-100/80 transition-colors cursor-pointer"
-                          title="Edit Current Total Score"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        {gameState.players.length > 1 && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono font-bold text-teal-900 text-sm">
+                            {score.toLocaleString()}
+                          </span>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              removePlayerFromActiveGame(player.id);
+                              setEditingScorePlayer({ id: player.id, name: player.name, currentScore: score });
+                              setManualScoreValue(score.toString());
                             }}
-                            className="p-1 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
-                            title="Remove from Game"
+                            className="p-1 text-slate-400 hover:text-orange-600 rounded-lg hover:bg-orange-100/80 transition-colors cursor-pointer"
+                            title="Edit Current Total Score"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Pencil className="w-3.5 h-3.5" />
                           </button>
-                        )}
+                          {gameState.players.length > 1 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removePlayerFromActiveGame(player.id);
+                              }}
+                              className="p-1 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
+                              title="Remove from Game"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
+
+                      {gameState.finalRoundState && (
+                        <div className="text-[10px] font-bold pt-1 border-t border-orange-100/60 flex items-center justify-between">
+                          {player.id === gameState.finalRoundState.leaderId ? (
+                            <span className="text-amber-600 dark:text-amber-400 font-black flex items-center gap-1 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-200">
+                              👑 Leader to Beat
+                            </span>
+                          ) : gameState.finalRoundState.playersPendingTurn.includes(player.id) ? (
+                            <span className="text-orange-600 dark:text-orange-400 font-bold flex items-center gap-1 bg-orange-50 dark:bg-orange-950/40 px-2 py-0.5 rounded-md border border-orange-200">
+                              ⏳ Final Turn Pending
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-medium flex items-center gap-1 bg-slate-50 dark:bg-slate-800/40 px-2 py-0.5 rounded-md border border-slate-200/50">
+                              ✓ Final Turn Taken
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

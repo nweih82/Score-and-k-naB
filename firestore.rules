@@ -17,7 +17,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
     }
 
     function incoming() {
@@ -72,6 +72,27 @@ service cloud.firestore {
         && (data.hostName == null || (data.hostName is string && data.hostName.size() <= 100))
         && (data.lastActionBy == null || (data.lastActionBy is string && data.lastActionBy.size() <= 100))
         && data.updatedAt is string;
+    }
+
+    function isValidHighScoreRecord(data) {
+      return data.keys().hasAll(['id', 'playerName', 'score', 'gameType', 'date'])
+        && data.id is string && data.id.size() <= 128
+        && data.playerName is string && data.playerName.size() <= 100
+        && data.score is number
+        && (data.gameType == 'farkle' || data.gameType == 'yahtzee' || data.gameType == 'dominoes')
+        && data.date is string && data.date.size() <= 100;
+    }
+
+    // Global Hall of Fame High Scores
+    match /test/{testId} {
+      allow read: if true;
+    }
+
+    // Global Hall of Fame High Scores
+    match /hallOfFame/{recordId} {
+      allow read, list, get: if true;
+      allow create, update: if isValidId(recordId) && isValidHighScoreRecord(incoming());
+      allow delete: if false;
     }
 
     // Live Game Rooms for Online Sync Across Devices

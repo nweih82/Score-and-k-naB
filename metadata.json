@@ -1,6 +1,8 @@
 {
   "name": "Bank & Score!",
   "description": "The ultimate companion app for Farkle, Yahtzee, and Dominoes — featuring instant score banking, automatic calculations, saved matches, and detailed player stats.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": [
+    "microphone"
+  ],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

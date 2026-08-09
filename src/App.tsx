@@ -103,23 +103,26 @@ import FarkleGuide from './components/FarkleGuide';
 import YahtzeeScorer from './components/YahtzeeScorer';
 import DominoesScorer from './components/DominoesScorer';
 import PlayerStatistics from './components/PlayerStatistics';
+import { HallOfFame } from './components/HallOfFame';
 import ThemeSelectorModal from './components/ThemeSelectorModal';
 import { ConfettiCelebration } from './components/ConfettiCelebration';
 import { OnlineRoomModal } from './components/OnlineRoomModal';
 import { OnlineSyncBar } from './components/OnlineSyncBar';
+import { AuthModal } from './components/AuthModal';
 import { COLOR_THEMES } from './theme';
 import { FarkleLogo, YahtzeeLogo, DominoesLogo, BankAndScoreLogo, BankAndScoreHorizontalLogo } from './components/GameLogos';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trophy, Flame, Sparkles, HelpCircle, History, RefreshCw, X, Check, Gamepad2, Users, ScrollText, BarChart3, Save, BookmarkCheck, Play, Trash2, Clock, Sun, Moon, Palette, LogIn, LogOut, Cloud, CloudOff, Volume2, VolumeX, Tv, Wifi } from 'lucide-react';
+import { Trophy, Flame, Sparkles, HelpCircle, History, RefreshCw, X, Check, Gamepad2, Users, ScrollText, BarChart3, Save, BookmarkCheck, Play, Trash2, Clock, Sun, Moon, Palette, LogIn, LogOut, Cloud, CloudOff, Volume2, VolumeX, Tv, Wifi, Crown, Maximize2, Minimize2 } from 'lucide-react';
 import { useSound } from './lib/SoundContext';
 import { useTv } from './lib/TvContext';
 import { TvRemoteBar } from './components/TvRemoteBar';
-import { GameRoomData } from './types';
+import { GameRoomData, HighScoreRecord } from './types';
 import {
   auth,
   loginWithGoogle,
   logoutFirebase,
   testConnection,
+  checkRedirectResultOnLoad,
   subscribeToPlayers,
   savePlayerToFirestore,
   deletePlayerFromFirestore,
@@ -131,6 +134,8 @@ import {
   subscribeToGameRoomInFirestore,
   updateGameRoomStateInFirestore,
   leaveGameRoomInFirestore,
+  subscribeToHallOfFame,
+  saveHighScoreToHallOfFame,
 } from './lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 
@@ -202,10 +207,46 @@ export default function App() {
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Test connection on mount
+  // Fullscreen state listener
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        if (document.documentElement.requestFullscreen) {
+          await document.documentElement.requestFullscreen();
+        } else if ((document.documentElement as any).webkitRequestFullscreen) {
+          await (document.documentElement as any).webkitRequestFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if ((document as any).webkitExitFullscreen) {
+          await (document as any).webkitExitFullscreen();
+        }
+      }
+    } catch (err) {
+      console.warn('Fullscreen toggle notice:', err);
+    }
+  };
+
+  // Test connection and check redirect auth result on mount
   useEffect(() => {
     testConnection();
+    checkRedirectResultOnLoad();
     const unsubscribe = onAuthStateChanged(auth, user => {
       setCurrentUser(user);
       setAuthLoading(false);
@@ -219,12 +260,22 @@ export default function App() {
   });
 
   const [activeGame, setActiveGame] = useState<GameType | null>(null);
-  const [lobbyTab, setLobbyTab] = useState<'stats' | 'history'>('stats');
+  const [lobbyTab, setLobbyTab] = useState<'stats' | 'history' | 'hallOfFame'>('hallOfFame');
   
   const [gameHistory, setGameHistory] = useState<GameHistoryEntry[]>(() => {
     const saved = localStorage.getItem('scorekeeper_history');
     return saved ? JSON.parse(saved) : [];
   });
+
+  const [globalHallOfFame, setGlobalHallOfFame] = useState<HighScoreRecord[]>([]);
+
+  // Subscribe to real-time global Hall of Fame records
+  useEffect(() => {
+    const unsubFame = subscribeToHallOfFame(records => {
+      setGlobalHallOfFame(records);
+    });
+    return () => unsubFame();
+  }, []);
 
   const [showFarkleGuide, setShowFarkleGuide] = useState(false);
   const [winnerCelebration, setWinnerCelebration] = useState<{
@@ -454,6 +505,23 @@ export default function App() {
       saveGameHistoryToFirestore(currentUser.uid, newEntry);
     }
 
+    // Post top scores to global Hall of Fame
+    Object.entries(scores).forEach(([playerId, score]) => {
+      const pObj = players.find(p => p.id === playerId);
+      if (pObj && score > 0) {
+        saveHighScoreToHallOfFame({
+          id: `fame-${newEntry.id}-${playerId}`,
+          playerName: pObj.name,
+          playerAvatar: pObj.avatar || '🎲',
+          playerColor: pObj.color || 'bg-emerald-500',
+          score: score,
+          gameType: activeGame,
+          date: newEntry.date,
+          isWinner: winnerName === pObj.name,
+        });
+      }
+    });
+
     setWinnerCelebration({
       winnerName,
       gameType: activeGame,
@@ -480,7 +548,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen text-slate-800 dark:text-slate-100 pb-12 font-sans selection:bg-amber-500/20 transition-colors duration-200">
+    <div className="min-h-[100dvh] w-full max-w-full overflow-x-hidden flex flex-col justify-between text-slate-800 dark:text-slate-100 pb-12 font-sans selection:bg-amber-500/20 transition-colors duration-200">
       {/* HEADER BAR */}
       <header className="bg-slate-900 border-b border-slate-800 py-3.5 px-4 sm:px-6 sticky top-0 z-30 shadow-xl">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -495,7 +563,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 justify-end">
             {/* Firebase Auth Controls */}
             {currentUser ? (
               <div className="flex items-center gap-2 bg-slate-800/90 border border-slate-700/80 rounded-full py-1 px-3">
@@ -526,9 +594,9 @@ export default function App() {
               </div>
             ) : (
               <button
-                onClick={loginWithGoogle}
+                onClick={() => setIsAuthModalOpen(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-full transition-all cursor-pointer shadow-sm border border-emerald-500/50"
-                title="Sign in with Google to sync scores across devices"
+                title="Sign in with Google, Email, or Guest Sync to sync scores across devices"
               >
                 <LogIn className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Cloud Sync / Login</span>
@@ -612,6 +680,27 @@ export default function App() {
                 <>
                   <Sun className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20" />
                   <span className="hidden sm:inline">Light Mode</span>
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={toggleFullscreen}
+              className={`flex items-center gap-1.5 px-3 py-1.5 ${
+                isFullscreen ? 'bg-indigo-600 text-white border-indigo-400 shadow-md' : 'bg-slate-800 text-slate-200 border-slate-700/80'
+              } hover:bg-indigo-600 hover:text-white font-bold text-xs rounded-full transition-all cursor-pointer border shadow-sm`}
+              title={isFullscreen ? 'Exit Full Screen Mode' : 'Enter Full Screen Mode'}
+              aria-label="Toggle Full Screen"
+            >
+              {isFullscreen ? (
+                <>
+                  <Minimize2 className="w-3.5 h-3.5 text-white" />
+                  <span className="hidden sm:inline">Exit Fullscreen</span>
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="hidden sm:inline">Fullscreen</span>
                 </>
               )}
             </button>
@@ -1077,14 +1166,25 @@ export default function App() {
                 </motion.div>
 
 
-                {/* LOBBY TABS & CONTENT (PLAYER STATISTICS / GAME HISTORY) */}
+                {/* LOBBY TABS & CONTENT (HALL OF FAME / PLAYER STATISTICS / GAME HISTORY) */}
                 <div className="space-y-4">
                   {/* Tab Navigation Controls */}
-                  <div className="flex items-center justify-between bg-orange-100/50 dark:bg-slate-900/80 p-1.5 rounded-2xl border border-orange-200/80 dark:border-slate-800">
-                    <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                  <div className="flex flex-wrap items-center justify-between bg-orange-100/50 dark:bg-slate-900/80 p-1.5 rounded-2xl border border-orange-200/80 dark:border-slate-800 gap-2">
+                    <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto">
+                      <button
+                        onClick={() => setLobbyTab('hallOfFame')}
+                        className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
+                          lobbyTab === 'hallOfFame'
+                            ? 'bg-amber-500 text-slate-950 shadow-sm'
+                            : 'text-teal-900/80 dark:text-slate-300 hover:text-teal-950 dark:hover:text-white hover:bg-orange-200/50 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        <Crown className="w-4 h-4 text-amber-950 dark:text-amber-400 fill-current" />
+                        Hall of Fame 🏆
+                      </button>
                       <button
                         onClick={() => setLobbyTab('stats')}
-                        className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
                           lobbyTab === 'stats'
                             ? 'bg-teal-900 dark:bg-emerald-600 text-white shadow-sm'
                             : 'text-teal-900/80 dark:text-slate-300 hover:text-teal-950 dark:hover:text-white hover:bg-orange-200/50 dark:hover:bg-slate-800'
@@ -1095,7 +1195,7 @@ export default function App() {
                       </button>
                       <button
                         onClick={() => setLobbyTab('history')}
-                        className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
                           lobbyTab === 'history'
                             ? 'bg-teal-900 dark:bg-emerald-600 text-white shadow-sm'
                             : 'text-teal-900/80 dark:text-slate-300 hover:text-teal-950 dark:hover:text-white hover:bg-orange-200/50 dark:hover:bg-slate-800'
@@ -1117,6 +1217,10 @@ export default function App() {
                   </div>
 
                   {/* ACTIVE LOBBY TAB CONTENT */}
+                  {lobbyTab === 'hallOfFame' && (
+                    <HallOfFame gameHistory={gameHistory} globalRecords={globalHallOfFame} />
+                  )}
+
                   {lobbyTab === 'stats' && (
                     <PlayerStatistics players={players} gameHistory={gameHistory} />
                   )}
@@ -1282,13 +1386,13 @@ export default function App() {
       {/* WINNER CELEBRATION MODAL OVERLAY */}
       <AnimatePresence>
         {winnerCelebration && (
-          <div className="fixed inset-0 bg-teal-950/70 flex items-center justify-center p-4 z-55 backdrop-blur-md">
+          <div className="fixed inset-0 bg-teal-950/70 flex items-center justify-center p-4 z-55 backdrop-blur-md overflow-y-auto">
             <ConfettiCelebration />
             <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-white dark:bg-slate-900 rounded-[40px] shadow-2xl border-2 border-orange-100 dark:border-slate-800 p-8 max-w-md w-full text-center relative overflow-hidden"
+              className="bg-white dark:bg-slate-900 rounded-[32px] sm:rounded-[40px] shadow-2xl border-2 border-orange-100 dark:border-slate-800 p-6 sm:p-8 max-w-md w-full text-center relative overflow-hidden max-h-[90vh] max-h-[90dvh] overflow-y-auto my-auto"
             >
               {/* Confetti-like ambient gradient */}
               <div className="absolute inset-0 bg-radial-gradient(ellipse_at_center,rgba(249,115,22,0.1),transparent) pointer-events-none" />
@@ -1372,12 +1476,12 @@ export default function App() {
       {/* QUIT CONFIRMATION MODAL OVERLAY */}
       <AnimatePresence>
         {showQuitConfirm && (
-          <div className="fixed inset-0 bg-teal-950/70 flex items-center justify-center p-4 z-55 backdrop-blur-md">
+          <div className="fixed inset-0 bg-teal-950/70 flex items-center justify-center p-4 z-55 backdrop-blur-md overflow-y-auto">
             <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-white dark:bg-slate-900 rounded-[40px] shadow-2xl border-2 border-orange-100 dark:border-slate-800 p-8 max-w-sm w-full text-center relative overflow-hidden"
+              className="bg-white dark:bg-slate-900 rounded-[32px] sm:rounded-[40px] shadow-2xl border-2 border-orange-100 dark:border-slate-800 p-6 sm:p-8 max-w-sm w-full text-center relative overflow-hidden max-h-[90vh] max-h-[90dvh] overflow-y-auto my-auto"
             >
               <div className="mx-auto w-16 h-16 bg-teal-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center text-teal-700 dark:text-teal-400 mb-6">
                 <BookmarkCheck className="w-8 h-8" />
@@ -1431,12 +1535,12 @@ export default function App() {
       {/* CLEAR HISTORY CONFIRMATION MODAL OVERLAY */}
       <AnimatePresence>
         {showClearHistoryConfirm && (
-          <div className="fixed inset-0 bg-teal-950/70 flex items-center justify-center p-4 z-55 backdrop-blur-md">
+          <div className="fixed inset-0 bg-teal-950/70 flex items-center justify-center p-4 z-55 backdrop-blur-md overflow-y-auto">
             <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-white dark:bg-slate-900 rounded-[40px] shadow-2xl border-2 border-orange-100 dark:border-slate-800 p-8 max-w-sm w-full text-center relative overflow-hidden"
+              className="bg-white dark:bg-slate-900 rounded-[32px] sm:rounded-[40px] shadow-2xl border-2 border-orange-100 dark:border-slate-800 p-6 sm:p-8 max-w-sm w-full text-center relative overflow-hidden max-h-[90vh] max-h-[90dvh] overflow-y-auto my-auto"
             >
               <div className="mx-auto w-16 h-16 bg-red-100 dark:bg-red-950/50 rounded-2xl flex items-center justify-center text-red-600 dark:text-red-400 mb-6">
                 <X className="w-8 h-8" />
@@ -1497,6 +1601,12 @@ export default function App() {
           setRoomExternalTurnScore(ts);
         }}
         deviceId={deviceId}
+      />
+
+      {/* CLOUD SYNC & AUTH MODAL */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
       />
     </div>
   );

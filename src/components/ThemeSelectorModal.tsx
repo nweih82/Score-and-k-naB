@@ -24,12 +24,12 @@ export default function ThemeSelectorModal({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm overflow-y-auto">
         <motion.div
           initial={{ opacity: 0, scale: 0.92, y: 12 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.92, y: 12 }}
-          className="bg-white dark:bg-slate-900 rounded-[32px] border-2 border-orange-100 dark:border-slate-800 p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-6 relative overflow-hidden"
+          className="bg-white dark:bg-slate-900 rounded-[32px] border-2 border-orange-100 dark:border-slate-800 p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-6 relative overflow-hidden max-h-[90vh] max-h-[90dvh] overflow-y-auto my-auto"
         >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">

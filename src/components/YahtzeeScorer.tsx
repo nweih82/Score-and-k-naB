@@ -4,6 +4,7 @@ import { Play, RotateCcw, Award, Check, X, ShieldAlert, Sparkles, AlertCircle, T
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, saveActiveGameToFirestore, deleteSavedGameFromFirestore } from '../lib/firebase';
 import { useSound } from '../lib/SoundContext';
+import VoiceCommandBar, { YahtzeeVoiceCommand } from './VoiceCommandBar';
 
 interface YahtzeeScorerProps {
   players: Player[];
@@ -290,15 +291,14 @@ export default function YahtzeeScorer({
     setInputValue(existingVal !== null ? existingVal.toString() : '');
   };
 
-  const handleSaveScore = (val: number | null) => {
-    if (!gameState || !editingCell) return;
+  const applyCategoryScore = (playerId: string, category: YahtzeeCategory, val: number | null) => {
+    if (!gameState) return;
     pushStateToHistory();
     if (val === 0) {
       playFarkle();
     } else if (val !== null) {
       playBank();
     }
-    const { playerId, category } = editingCell;
 
     // Update individual score
     const updatedSheet = {
@@ -311,8 +311,6 @@ export default function YahtzeeScorer({
       [playerId]: updatedSheet,
     };
 
-    // Calculate game progress/completion
-    // A classic Yahtzee score sheet has 13 categories to fill (excluding bonuses)
     let allCompleted = true;
     const totals: Record<string, number> = {};
 
@@ -327,7 +325,6 @@ export default function YahtzeeScorer({
 
     let winnerId = null;
     if (allCompleted) {
-      // Find highest score
       let highestScore = -1;
       gameState.players.forEach(p => {
         if (totals[p.id] > highestScore) {
@@ -337,7 +334,6 @@ export default function YahtzeeScorer({
       });
     }
 
-    // Cycle to next player whose turn it might be
     const activeIdx = gameState.players.findIndex(p => p.id === gameState.activePlayerId);
     const nextIdx = (activeIdx + 1) % gameState.players.length;
     const nextPlayerId = gameState.players[nextIdx].id;
@@ -359,6 +355,35 @@ export default function YahtzeeScorer({
         localStorage.removeItem('scorekeeper_saved_yahtzee');
         onGameFinished(winPlayer.name, totals);
       }
+    }
+  };
+
+  const handleSaveScore = (val: number | null) => {
+    if (!editingCell) return;
+    applyCategoryScore(editingCell.playerId, editingCell.category, val);
+  };
+
+  const handleVoiceCommand = (cmd: YahtzeeVoiceCommand) => {
+    if (!gameState || gameState.isCompleted) return;
+
+    if (cmd.type === 'UNDO') {
+      handleUndo();
+      return;
+    }
+
+    if (cmd.type === 'NEXT_PLAYER') {
+      const activeIdx = gameState.players.findIndex(p => p.id === gameState.activePlayerId);
+      const nextIdx = (activeIdx + 1) % gameState.players.length;
+      setGameState(prev => prev ? { ...prev, activePlayerId: prev.players[nextIdx].id } : null);
+      return;
+    }
+
+    const activePlayerId = gameState.activePlayerId;
+
+    if (cmd.type === 'SCRATCH_CATEGORY') {
+      applyCategoryScore(activePlayerId, cmd.category, 0);
+    } else if (cmd.type === 'SCORE_CATEGORY') {
+      applyCategoryScore(activePlayerId, cmd.category, cmd.score);
     }
   };
 
@@ -533,8 +558,18 @@ export default function YahtzeeScorer({
 
   if (!gameState) return null;
 
+  const activePlayerObj = gameState.players.find(p => p.id === gameState.activePlayerId);
+
   return (
     <div className="space-y-6">
+      {/* Voice Command Bar */}
+      <VoiceCommandBar
+        gameType="yahtzee"
+        activePlayerName={activePlayerObj?.name}
+        playerNames={gameState.players.map(p => p.name)}
+        onYahtzeeCommand={handleVoiceCommand}
+      />
+
       {/* Top Bar info */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 yz-themed-card p-5 rounded-[32px] border-2 shadow-sm">
         <div className="flex items-center gap-2">
@@ -920,7 +955,7 @@ export default function YahtzeeScorer({
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="yz-themed-card rounded-[40px] shadow-2xl max-w-sm w-full border-2 yz-row-border overflow-hidden"
+              className="yz-themed-card rounded-[32px] sm:rounded-[40px] shadow-2xl max-w-sm w-full border-2 yz-row-border overflow-hidden max-h-[90vh] max-h-[90dvh] overflow-y-auto my-auto"
             >
               {/* Header */}
               <div className="yz-themed-header border-b-2 yz-row-border px-6 py-4 flex items-center justify-between">
@@ -1009,12 +1044,12 @@ export default function YahtzeeScorer({
       {/* RESET GAME CONFIRMATION OVERLAY */}
       <AnimatePresence>
         {showResetConfirm && (
-          <div className="fixed inset-0 bg-teal-950/70 flex items-center justify-center p-4 z-55 backdrop-blur-md">
+          <div className="fixed inset-0 bg-teal-950/70 flex items-center justify-center p-4 z-55 backdrop-blur-md overflow-y-auto">
             <motion.div
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-white rounded-[40px] shadow-2xl border-2 border-orange-100 p-8 max-w-sm w-full text-center relative overflow-hidden"
+              className="bg-white rounded-[32px] sm:rounded-[40px] shadow-2xl border-2 border-orange-100 p-6 sm:p-8 max-w-sm w-full text-center relative overflow-hidden max-h-[90vh] max-h-[90dvh] overflow-y-auto my-auto"
             >
               <div className="mx-auto w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center text-red-600 mb-6">
                 <RotateCcw className="w-8 h-8" />

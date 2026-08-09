@@ -16,6 +16,18 @@ export interface GameHistoryEntry {
   scores: Record<string, number>; // player.id -> finalScore
 }
 
+export interface HighScoreRecord {
+  id: string;
+  playerName: string;
+  playerAvatar?: string;
+  playerColor?: string;
+  score: number;
+  gameType: GameType;
+  date: string;
+  isWinner?: boolean;
+  createdAt?: string;
+}
+
 // FARKLE TYPES
 export interface FarkleRound {
   scores: Record<string, number>; // player.id -> score achieved in this round
@@ -32,6 +44,11 @@ export interface FarkleState {
   activePlayerId: string;
   // Current active turn scratchpad
   turnHistory: { rollScore: number; diceKept: number[] }[];
+  finalRoundState?: {
+    leaderId: string;
+    highScoreToBeat: number;
+    playersPendingTurn: string[];
+  } | null;
 }
 
 // YAHTZEE TYPES

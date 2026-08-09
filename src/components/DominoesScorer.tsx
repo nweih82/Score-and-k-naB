@@ -466,9 +466,9 @@ export default function DominoesScorer({
   const activePlayer = gameState.players.find(p => p.id === gameState.activePlayerId)!;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <div className="grid grid-cols-1 landscape:grid-cols-12 md:grid-cols-12 gap-6">
       {/* Left Area - Active Scoring Cards */}
-      <div className="lg:col-span-8 space-y-6">
+      <div className="landscape:col-span-7 md:col-span-7 lg:col-span-8 space-y-4 sm:space-y-6">
         {/* Active Player Box */}
         <div className="bg-teal-600 text-white rounded-[32px] p-6 shadow-lg border-2 border-teal-500/20 relative overflow-hidden">
           <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-orange-500/20 rounded-full blur-2xl" />
@@ -580,7 +580,7 @@ export default function DominoesScorer({
       </div>
 
       {/* Right Area - Current Standings & Game Log */}
-      <div className="lg:col-span-4 space-y-6">
+      <div className="landscape:col-span-5 md:col-span-5 lg:col-span-4 space-y-4 sm:space-y-6">
         {/* Leaderboard */}
         <div className="bg-white rounded-[32px] shadow-sm border-2 border-orange-100 p-6">
           <h3 className="text-[10px] font-black text-teal-800 uppercase tracking-widest mb-4 flex items-center justify-between">

@@ -221,10 +221,16 @@ export default function FarkleGuide({ onClose }: FarkleGuideProps) {
 
       <div className="mt-6 bg-orange-50/70 border border-orange-100 rounded-3xl p-5 flex gap-3 items-start">
         <Star className="w-5 h-5 text-orange-500 shrink-0 mt-0.5" />
-        <p className="text-xs text-teal-950 font-bold leading-relaxed">
-          <strong className="uppercase tracking-wider block text-[10px] text-orange-600 mb-1">How to play Farkle:</strong>
-          Players roll 6 dice. Scoring dice are set aside. You can choose to bank points or roll the remaining dice. If a roll scores no points, you <strong>Farkle</strong> and lose all unbanked points for that turn!
-        </p>
+        <div className="text-xs text-teal-950 font-bold leading-relaxed space-y-2">
+          <p>
+            <strong className="uppercase tracking-wider block text-[10px] text-orange-600 mb-0.5">How to play Farkle:</strong>
+            Players roll 6 dice. Scoring dice are set aside. You can choose to bank points or roll remaining dice. If a roll scores no points, you <strong>Farkle</strong> and lose all unbanked points for that turn!
+          </p>
+          <p className="pt-1.5 border-t border-orange-200/60">
+            <strong className="uppercase tracking-wider block text-[10px] text-teal-700 mb-0.5">Final Round / Beat the Score:</strong>
+            When a player reaches the target score (e.g. 10,000 pts), all other players get 1 final turn to beat that high score. If another player beats it, they take the lead and all other players get another chance!
+          </p>
+        </div>
       </div>
 
       {onClose && (
