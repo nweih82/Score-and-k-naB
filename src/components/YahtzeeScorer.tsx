@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { Player, YahtzeeState, YahtzeeCategory, YahtzeePlayerScore } from '../types';
-import { Play, RotateCcw, Award, Check, X, ShieldAlert, Sparkles, AlertCircle, Trash2, UserPlus, Plus, Undo } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Player, YahtzeeState, YahtzeeCategory, YahtzeePlayerScore, ActionLogItem, YahtzeeHouseRules } from '../types';
+import { Play, RotateCcw, Award, Check, X, ShieldAlert, Sparkles, AlertCircle, Trash2, UserPlus, Plus, Undo, Activity, Mic, Hand, Clock, Wifi, Sliders } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, saveActiveGameToFirestore, deleteSavedGameFromFirestore } from '../lib/firebase';
 import { useSound } from '../lib/SoundContext';
-import VoiceCommandBar, { YahtzeeVoiceCommand } from './VoiceCommandBar';
+import { VoiceAssistantWidget, VoiceCommandResult } from './VoiceAssistantWidget';
+import { safeClone, safeJsonStringify } from '../lib/utils';
+import { loadActiveHouseRules } from '../lib/houseRules';
 
 interface YahtzeeScorerProps {
   players: Player[];
@@ -13,6 +15,8 @@ interface YahtzeeScorerProps {
   externalGameState?: YahtzeeState | null;
   onSyncGameRoom?: (newGameState: YahtzeeState) => void;
   isOnlineSynced?: boolean;
+  houseRules?: YahtzeeHouseRules;
+  onOpenHouseRules?: () => void;
 }
 
 const CATEGORIES: { key: YahtzeeCategory; label: string; desc: string; max?: number; isUpper: boolean }[] = [
@@ -57,16 +61,45 @@ export default function YahtzeeScorer({
   externalGameState,
   onSyncGameRoom,
   isOnlineSynced,
+  houseRules,
+  onOpenHouseRules,
 }: YahtzeeScorerProps) {
   const { playBank, playFarkle, playUndo } = useSound();
-  const [gameState, setGameState] = useState<YahtzeeState | null>(null);
+  const [gameState, setGameState] = useState<YahtzeeState | null>(() => {
+    if (externalGameState && Array.isArray(externalGameState.players) && externalGameState.players.length > 0) {
+      return externalGameState;
+    }
+    return null;
+  });
   const [historyStack, setHistoryStack] = useState<YahtzeeState[]>([]);
-  const [isSettingUp, setIsSettingUp] = useState(true);
+  const [isSettingUp, setIsSettingUp] = useState<boolean>(() => {
+    if (externalGameState && Array.isArray(externalGameState.players) && externalGameState.players.length > 0) {
+      return false;
+    }
+    return true;
+  });
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
+
+  const getActiveRules = (): YahtzeeHouseRules => {
+    return gameState?.rules || houseRules || loadActiveHouseRules().yahtzee;
+  };
+
+  const getCategoryDescription = (catKey: YahtzeeCategory, rules: YahtzeeHouseRules): string => {
+    switch (catKey) {
+      case 'fullHouse': return `Three of one, pair of another (${rules.fullHouseScore ?? 25} pts)`;
+      case 'smallStraight': return `Sequence of 4 dice (${rules.smallStraightScore ?? 30} pts)`;
+      case 'largeStraight': return `Sequence of 5 dice (${rules.largeStraightScore ?? 40} pts)`;
+      case 'yahtzee': return `5 of a kind (${rules.yahtzeeScore ?? 50} pts)`;
+      default: {
+        const found = CATEGORIES.find(c => c.key === catKey);
+        return found?.desc || '';
+      }
+    }
+  };
 
   const pushStateToHistory = () => {
     if (gameState) {
-      setHistoryStack(prev => [...prev, JSON.parse(JSON.stringify(gameState))]);
+      setHistoryStack(prev => [...prev, safeClone(gameState)]);
     }
   };
 
@@ -95,8 +128,11 @@ export default function YahtzeeScorer({
   } | null>(null);
   const [inputValue, setInputValue] = useState('');
 
-  // Check for saved game on mount
+  // Check for saved game on mount (ONLY for local/offline mode, not when connected to an online room)
   useEffect(() => {
+    if (isOnlineSynced || (externalGameState && Array.isArray(externalGameState.players) && externalGameState.players.length > 0)) {
+      return;
+    }
     const saved = localStorage.getItem('scorekeeper_saved_yahtzee');
     if (saved) {
       try {
@@ -109,41 +145,81 @@ export default function YahtzeeScorer({
         console.error("Error loading saved Yahtzee game", err);
       }
     }
-  }, []);
+  }, [isOnlineSynced]);
+
+  const isIncomingSyncRef = useRef<boolean>(false);
+  const lastReceivedExternalJsonRef = useRef<string>(
+    externalGameState && Array.isArray(externalGameState.players) && externalGameState.players.length > 0
+      ? safeJsonStringify({ gameState: externalGameState })
+      : ''
+  );
 
   // Listen to external online game room updates
   useEffect(() => {
-    if (externalGameState) {
-      setGameState(externalGameState);
-      setIsSettingUp(false);
+    if (!externalGameState || !Array.isArray(externalGameState.players) || externalGameState.players.length === 0) {
+      return;
     }
+
+    const incomingJson = safeJsonStringify({ gameState: externalGameState });
+
+    // If identical to what we already recorded as the external state, ignore
+    if (incomingJson === lastReceivedExternalJsonRef.current) {
+      return;
+    }
+
+    // Also compare against current local state to avoid setting identical state
+    const currentJson = safeJsonStringify({ gameState });
+    if (incomingJson === currentJson) {
+      lastReceivedExternalJsonRef.current = incomingJson;
+      return;
+    }
+
+    // Mark as incoming sync so the local change effect will NOT echo back to Firestore
+    isIncomingSyncRef.current = true;
+    lastReceivedExternalJsonRef.current = incomingJson;
+
+    setGameState(externalGameState);
+    setIsSettingUp(false);
   }, [externalGameState]);
 
   // Save game progress automatically whenever gameState changes
   useEffect(() => {
-    if (gameState) {
-      if (gameState.isCompleted || gameState.winnerId) {
-        localStorage.removeItem('scorekeeper_saved_yahtzee');
-        if (auth.currentUser) {
-          deleteSavedGameFromFirestore(auth.currentUser.uid, 'yahtzee');
-        }
-      } else {
-        const savedData = {
-          gameType: 'yahtzee' as const,
-          gameState,
-          updatedAt: new Date().toISOString(),
-        };
-        localStorage.setItem('scorekeeper_saved_yahtzee', JSON.stringify(savedData));
-        if (auth.currentUser) {
-          saveActiveGameToFirestore(auth.currentUser.uid, 'yahtzee', savedData);
+    if (gameState && Array.isArray(gameState.players) && gameState.players.length > 0) {
+      // If this state update was received from the external room, do not echo back or overwrite local solo save
+      if (isIncomingSyncRef.current) {
+        isIncomingSyncRef.current = false;
+        return;
+      }
+
+      if (!isOnlineSynced) {
+        if (gameState.isCompleted || gameState.winnerId) {
+          localStorage.removeItem('scorekeeper_saved_yahtzee');
+          if (auth.currentUser) {
+            deleteSavedGameFromFirestore(auth.currentUser.uid, 'yahtzee');
+          }
+        } else {
+          const savedData = {
+            gameType: 'yahtzee' as const,
+            gameState,
+            updatedAt: new Date().toISOString(),
+          };
+          localStorage.setItem('scorekeeper_saved_yahtzee', safeJsonStringify(savedData));
+          if (auth.currentUser) {
+            saveActiveGameToFirestore(auth.currentUser.uid, 'yahtzee', savedData);
+          }
         }
       }
 
-      if (onSyncGameRoom) {
-        onSyncGameRoom(gameState);
+      // Check if this update came from external sync before echoing to Firestore
+      if (isOnlineSynced && onSyncGameRoom) {
+        const currentJson = safeJsonStringify({ gameState });
+        if (currentJson !== lastReceivedExternalJsonRef.current) {
+          lastReceivedExternalJsonRef.current = currentJson;
+          onSyncGameRoom(gameState);
+        }
       }
     }
-  }, [gameState]);
+  }, [gameState, isOnlineSynced]);
 
   const removePlayerFromActiveGame = (playerId: string) => {
     if (!gameState) return;
@@ -233,6 +309,8 @@ export default function YahtzeeScorer({
       initialScores[p.id] = createEmptyScoreSheet();
     });
 
+    const activeRules = houseRules || loadActiveHouseRules().yahtzee;
+
     setHistoryStack([]);
     setGameState({
       players: gamePlayers,
@@ -240,47 +318,181 @@ export default function YahtzeeScorer({
       activePlayerId: gamePlayers[0].id,
       winnerId: null,
       isCompleted: false,
+      rules: activeRules,
     });
 
     setIsSettingUp(false);
     setEditingCell(null);
   };
 
-  const calculateSubtotal = (scoreSheet: YahtzeePlayerScore): number => {
+  const calculateSubtotal = (scoreSheet?: YahtzeePlayerScore | null): number => {
+    if (!scoreSheet) return 0;
     let sum = 0;
-    if (scoreSheet.aces !== null) sum += scoreSheet.aces;
-    if (scoreSheet.twos !== null) sum += scoreSheet.twos;
-    if (scoreSheet.threes !== null) sum += scoreSheet.threes;
-    if (scoreSheet.fours !== null) sum += scoreSheet.fours;
-    if (scoreSheet.fives !== null) sum += scoreSheet.fives;
-    if (scoreSheet.sixes !== null) sum += scoreSheet.sixes;
-    return sum;
+    const keys: (keyof YahtzeePlayerScore)[] = ['aces', 'twos', 'threes', 'fours', 'fives', 'sixes'];
+    keys.forEach(k => {
+      const v = Number(scoreSheet[k]);
+      if (!isNaN(v) && scoreSheet[k] !== null && scoreSheet[k] !== undefined) {
+        sum += v;
+      }
+    });
+    return isNaN(sum) ? 0 : sum;
   };
 
-  const calculateBonus = (scoreSheet: YahtzeePlayerScore): number => {
+  const calculateBonus = (scoreSheet?: YahtzeePlayerScore | null): number => {
     const subtotal = calculateSubtotal(scoreSheet);
-    return subtotal >= 63 ? 35 : 0;
+    const rules = getActiveRules();
+    const threshold = rules.upperBonusThreshold ?? 63;
+    const bonus = rules.upperBonusAmount ?? 35;
+    return subtotal >= threshold ? bonus : 0;
   };
 
-  const calculateUpperTotal = (scoreSheet: YahtzeePlayerScore): number => {
+  const calculateUpperTotal = (scoreSheet?: YahtzeePlayerScore | null): number => {
     return calculateSubtotal(scoreSheet) + calculateBonus(scoreSheet);
   };
 
-  const calculateLowerTotal = (scoreSheet: YahtzeePlayerScore): number => {
+  const calculateLowerTotal = (scoreSheet?: YahtzeePlayerScore | null): number => {
+    if (!scoreSheet) return 0;
     let sum = 0;
-    if (scoreSheet.threeOfAKind !== null) sum += scoreSheet.threeOfAKind;
-    if (scoreSheet.fourOfAKind !== null) sum += scoreSheet.fourOfAKind;
-    if (scoreSheet.fullHouse !== null) sum += scoreSheet.fullHouse;
-    if (scoreSheet.smallStraight !== null) sum += scoreSheet.smallStraight;
-    if (scoreSheet.largeStraight !== null) sum += scoreSheet.largeStraight;
-    if (scoreSheet.yahtzee !== null) sum += scoreSheet.yahtzee;
-    if (scoreSheet.chance !== null) sum += scoreSheet.chance;
-    sum += scoreSheet.yahtzeeBonusCount * 100;
-    return sum;
+    const keys: (keyof YahtzeePlayerScore)[] = [
+      'threeOfAKind', 'fourOfAKind', 'fullHouse', 'smallStraight', 'largeStraight', 'yahtzee', 'chance'
+    ];
+    keys.forEach(k => {
+      const v = Number(scoreSheet[k]);
+      if (!isNaN(v) && scoreSheet[k] !== null && scoreSheet[k] !== undefined) {
+        sum += v;
+      }
+    });
+    const bonusCount = Number(scoreSheet.yahtzeeBonusCount);
+    if (!isNaN(bonusCount) && bonusCount > 0) {
+      const rules = getActiveRules();
+      sum += bonusCount * (rules.extraYahtzeeBonus ?? 100);
+    }
+    return isNaN(sum) ? 0 : sum;
   };
 
-  const calculateGrandTotal = (scoreSheet: YahtzeePlayerScore): number => {
-    return calculateUpperTotal(scoreSheet) + calculateLowerTotal(scoreSheet);
+  const calculateGrandTotal = (scoreSheet?: YahtzeePlayerScore | null): number => {
+    const total = calculateUpperTotal(scoreSheet) + calculateLowerTotal(scoreSheet);
+    return isNaN(total) ? 0 : total;
+  };
+
+  const [isListening, setIsListening] = useState(false);
+  const [voiceFeedback, setVoiceFeedback] = useState<string | null>(null);
+
+  const toggleVoiceListening = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setVoiceFeedback('Voice recognition not supported in browser');
+      setTimeout(() => setVoiceFeedback(null), 3000);
+      return;
+    }
+
+    if (isListening) {
+      setIsListening(false);
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setVoiceFeedback('Listening... Say e.g. "Full house 25" or "Aces 3"');
+      };
+
+      recognition.onresult = (event: any) => {
+        setIsListening(false);
+        const transcript = event.results[0][0].transcript.toLowerCase().trim();
+        setVoiceFeedback(`Heard: "${transcript}"`);
+        setTimeout(() => setVoiceFeedback(null), 3500);
+
+        if (!gameState) return;
+        const activePlayerId = gameState.activePlayerId;
+
+        let matchedCategory: YahtzeeCategory | null = null;
+        if (transcript.includes('ace') || transcript.includes('one')) matchedCategory = 'aces';
+        else if (transcript.includes('two')) matchedCategory = 'twos';
+        else if (transcript.includes('three') && !transcript.includes('kind')) matchedCategory = 'threes';
+        else if (transcript.includes('four') && !transcript.includes('kind')) matchedCategory = 'fours';
+        else if (transcript.includes('five')) matchedCategory = 'fives';
+        else if (transcript.includes('six')) matchedCategory = 'sixes';
+        else if (transcript.includes('full house')) matchedCategory = 'fullHouse';
+        else if (transcript.includes('small straight')) matchedCategory = 'smallStraight';
+        else if (transcript.includes('large straight')) matchedCategory = 'largeStraight';
+        else if (transcript.includes('yahtzee')) matchedCategory = 'yahtzee';
+        else if (transcript.includes('three of a kind') || transcript.includes('3 of a kind')) matchedCategory = 'threeOfAKind';
+        else if (transcript.includes('four of a kind') || transcript.includes('4 of a kind')) matchedCategory = 'fourOfAKind';
+        else if (transcript.includes('chance')) matchedCategory = 'chance';
+
+        const matchNum = transcript.match(/\d+/);
+        const scoreVal = matchNum ? parseInt(matchNum[0], 10) : (transcript.includes('zero') || transcript.includes('scratch') ? 0 : null);
+
+        if (matchedCategory && scoreVal !== null) {
+          pushStateToHistory();
+          if (scoreVal === 0) playFarkle();
+          else playBank();
+
+          const player = gameState.players.find(p => p.id === activePlayerId);
+          const catObj = CATEGORIES.find(c => c.key === matchedCategory);
+          const desc = scoreVal === 0 
+            ? `Zeroed out ${catObj?.label || matchedCategory}`
+            : `Scored +${scoreVal} pts in ${catObj?.label || matchedCategory}`;
+
+          const actionItem: ActionLogItem = {
+            id: Date.now().toString() + Math.random().toString().substring(2, 5),
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            playerId: activePlayerId,
+            playerName: player?.name || 'Player',
+            playerColor: player?.color,
+            actionType: 'edit_score',
+            description: desc,
+            points: scoreVal,
+            source: 'voice',
+          };
+          const updatedRecentActions = [actionItem, ...(gameState.recentActions || [])].slice(0, 20);
+
+          const updatedSheet = {
+            ...gameState.scores[activePlayerId],
+            [matchedCategory]: scoreVal,
+          };
+          const updatedScores = {
+            ...gameState.scores,
+            [activePlayerId]: updatedSheet,
+          };
+
+          const activeIdx = gameState.players.findIndex(p => p.id === activePlayerId);
+          const nextIdx = (activeIdx + 1) % gameState.players.length;
+          const nextPlayerId = gameState.players[nextIdx].id;
+
+          setGameState({
+            ...gameState,
+            scores: updatedScores,
+            activePlayerId: nextPlayerId,
+            recentActions: updatedRecentActions,
+          });
+          setEditingCell(null);
+          setVoiceFeedback(`Logged ${scoreVal} pts for ${catObj?.label} (Voice)!`);
+        }
+      };
+
+      recognition.onerror = () => {
+        setIsListening(false);
+        setVoiceFeedback('Speech not recognized. Try again!');
+        setTimeout(() => setVoiceFeedback(null), 3000);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognition.start();
+    } catch {
+      setIsListening(false);
+      setVoiceFeedback('Unable to start mic');
+      setTimeout(() => setVoiceFeedback(null), 3000);
+    }
   };
 
   const handleCellClick = (playerId: string, category: YahtzeeCategory) => {
@@ -291,14 +503,35 @@ export default function YahtzeeScorer({
     setInputValue(existingVal !== null ? existingVal.toString() : '');
   };
 
-  const applyCategoryScore = (playerId: string, category: YahtzeeCategory, val: number | null) => {
-    if (!gameState) return;
+  const handleSaveScore = (val: number | null, sourceInput?: any) => {
+    if (!gameState || !editingCell) return;
+    const source: 'manual' | 'voice' = sourceInput === 'voice' ? 'voice' : 'manual';
     pushStateToHistory();
     if (val === 0) {
       playFarkle();
     } else if (val !== null) {
       playBank();
     }
+    const { playerId, category } = editingCell;
+    const player = gameState.players.find(p => p.id === playerId);
+    const catObj = CATEGORIES.find(c => c.key === category);
+
+    const desc = val === 0 
+      ? `Zeroed out ${catObj?.label || category}`
+      : `Scored +${val} pts in ${catObj?.label || category}`;
+
+    const actionItem: ActionLogItem = {
+      id: Date.now().toString() + Math.random().toString().substring(2, 5),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      playerId,
+      playerName: player?.name || 'Player',
+      playerColor: player?.color,
+      actionType: 'edit_score',
+      description: desc,
+      points: val || 0,
+      source,
+    };
+    const updatedRecentActions = [actionItem, ...(gameState.recentActions || [])].slice(0, 20);
 
     // Update individual score
     const updatedSheet = {
@@ -311,6 +544,7 @@ export default function YahtzeeScorer({
       [playerId]: updatedSheet,
     };
 
+    // Calculate game progress/completion
     let allCompleted = true;
     const totals: Record<string, number> = {};
 
@@ -334,6 +568,7 @@ export default function YahtzeeScorer({
       });
     }
 
+    // Cycle to next player whose turn it might be
     const activeIdx = gameState.players.findIndex(p => p.id === gameState.activePlayerId);
     const nextIdx = (activeIdx + 1) % gameState.players.length;
     const nextPlayerId = gameState.players[nextIdx].id;
@@ -344,6 +579,7 @@ export default function YahtzeeScorer({
       activePlayerId: nextPlayerId,
       winnerId,
       isCompleted: allCompleted,
+      recentActions: updatedRecentActions,
     };
 
     setGameState(newGameState);
@@ -358,42 +594,34 @@ export default function YahtzeeScorer({
     }
   };
 
-  const handleSaveScore = (val: number | null) => {
-    if (!editingCell) return;
-    applyCategoryScore(editingCell.playerId, editingCell.category, val);
-  };
-
-  const handleVoiceCommand = (cmd: YahtzeeVoiceCommand) => {
-    if (!gameState || gameState.isCompleted) return;
-
-    if (cmd.type === 'UNDO') {
-      handleUndo();
-      return;
-    }
-
-    if (cmd.type === 'NEXT_PLAYER') {
-      const activeIdx = gameState.players.findIndex(p => p.id === gameState.activePlayerId);
-      const nextIdx = (activeIdx + 1) % gameState.players.length;
-      setGameState(prev => prev ? { ...prev, activePlayerId: prev.players[nextIdx].id } : null);
-      return;
-    }
-
-    const activePlayerId = gameState.activePlayerId;
-
-    if (cmd.type === 'SCRATCH_CATEGORY') {
-      applyCategoryScore(activePlayerId, cmd.category, 0);
-    } else if (cmd.type === 'SCORE_CATEGORY') {
-      applyCategoryScore(activePlayerId, cmd.category, cmd.score);
-    }
-  };
-
   const handleYahtzeeBonusChange = (playerId: string, increment: boolean) => {
     if (!gameState || gameState.isCompleted) return;
     pushStateToHistory();
 
+    const player = gameState.players.find(p => p.id === playerId);
     const sheet = gameState.scores[playerId];
     const currentCount = sheet.yahtzeeBonusCount;
     const newCount = increment ? currentCount + 1 : Math.max(0, currentCount - 1);
+
+    const rules = getActiveRules();
+    const bonusMultiplier = rules.extraYahtzeeBonus ?? 100;
+
+    const desc = increment
+      ? `Added Yahtzee Bonus (+${bonusMultiplier} pts)`
+      : `Removed Yahtzee Bonus (-${bonusMultiplier} pts)`;
+
+    const actionItem: ActionLogItem = {
+      id: Date.now().toString() + Math.random().toString().substring(2, 5),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      playerId,
+      playerName: player?.name || 'Player',
+      playerColor: player?.color,
+      actionType: 'edit_score',
+      description: desc,
+      points: increment ? bonusMultiplier : -bonusMultiplier,
+      source: 'manual',
+    };
+    const updatedRecentActions = [actionItem, ...(gameState.recentActions || [])].slice(0, 20);
 
     const updatedSheet = {
       ...sheet,
@@ -406,6 +634,7 @@ export default function YahtzeeScorer({
         ...gameState.scores,
         [playerId]: updatedSheet,
       },
+      recentActions: updatedRecentActions,
     });
   };
 
@@ -423,11 +652,12 @@ export default function YahtzeeScorer({
 
   // Quick select presets based on category
   const getPresetsForCategory = (category: YahtzeeCategory) => {
+    const rules = getActiveRules();
     switch (category) {
-      case 'fullHouse': return [25, 0];
-      case 'smallStraight': return [30, 0];
-      case 'largeStraight': return [40, 0];
-      case 'yahtzee': return [50, 0];
+      case 'fullHouse': return [rules.fullHouseScore ?? 25, 0];
+      case 'smallStraight': return [rules.smallStraightScore ?? 30, 0];
+      case 'largeStraight': return [rules.largeStraightScore ?? 40, 0];
+      case 'yahtzee': return [rules.yahtzeeScore ?? 50, 0];
       case 'aces': return [1, 2, 3, 4, 5, 0];
       case 'twos': return [2, 4, 6, 8, 10, 0];
       case 'threes': return [3, 6, 9, 12, 15, 0];
@@ -542,6 +772,58 @@ export default function YahtzeeScorer({
             )}
           </div>
 
+          {/* Step 2: Active House Rules */}
+          <div className="p-4 bg-orange-50/50 rounded-2xl border-2 border-orange-100/90 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-orange-600" />
+                <span className="text-[10px] font-black text-teal-900 uppercase tracking-widest">
+                  Active House Rules
+                </span>
+              </div>
+              {onOpenHouseRules && (
+                <button
+                  type="button"
+                  onClick={onOpenHouseRules}
+                  className="px-2.5 py-1 bg-white hover:bg-orange-100/60 text-orange-700 border border-orange-200 text-[10px] font-black uppercase rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                >
+                  <Sliders className="w-3 h-3" /> Customize Rules
+                </button>
+              )}
+            </div>
+            {(() => {
+              const rules = getActiveRules();
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                  <div className="bg-white/80 p-2 rounded-xl border border-orange-100/70">
+                    <span className="text-slate-400 block text-[9px] uppercase font-bold">Upper Bonus:</span>
+                    <span className="font-extrabold text-slate-800">
+                      +{rules.upperBonusAmount} (≥{rules.upperBonusThreshold})
+                    </span>
+                  </div>
+                  <div className="bg-white/80 p-2 rounded-xl border border-orange-100/70">
+                    <span className="text-slate-400 block text-[9px] uppercase font-bold">Extra Yahtzee:</span>
+                    <span className="font-extrabold text-slate-800">
+                      +{rules.extraYahtzeeBonus} pts
+                    </span>
+                  </div>
+                  <div className="bg-white/80 p-2 rounded-xl border border-orange-100/70">
+                    <span className="text-slate-400 block text-[9px] uppercase font-bold">Full House:</span>
+                    <span className="font-extrabold text-slate-800">
+                      {rules.fullHouseScore} pts
+                    </span>
+                  </div>
+                  <div className="bg-white/80 p-2 rounded-xl border border-orange-100/70">
+                    <span className="text-slate-400 block text-[9px] uppercase font-bold">Lg Straight:</span>
+                    <span className="font-extrabold text-slate-800">
+                      {rules.largeStraightScore} pts
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
           {/* Start Button */}
           <button
             onClick={startNewGame}
@@ -556,18 +838,97 @@ export default function YahtzeeScorer({
     );
   }
 
-  if (!gameState) return null;
+  const handleVoiceCommandInYahtzee = (result: VoiceCommandResult) => {
+    if (!gameState || gameState.isCompleted) return;
 
-  const activePlayerObj = gameState.players.find(p => p.id === gameState.activePlayerId);
+    if (result.actionType === 'score_category' && result.category) {
+      const activePlayerId = gameState.activePlayerId;
+      const matchedCategory = result.category as YahtzeeCategory;
+      const scoreVal = result.points !== undefined && result.points !== null ? result.points : 0;
+
+      pushStateToHistory();
+      if (scoreVal === 0) playFarkle();
+      else playBank();
+
+      const player = gameState.players.find(p => p.id === activePlayerId);
+      const catObj = CATEGORIES.find(c => c.key === matchedCategory);
+      const desc = scoreVal === 0 
+        ? `Zeroed out ${catObj?.label || matchedCategory}`
+        : `Scored +${scoreVal} pts in ${catObj?.label || matchedCategory}`;
+
+      const actionItem: ActionLogItem = {
+        id: Date.now().toString() + Math.random().toString().substring(2, 5),
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        playerId: activePlayerId,
+        playerName: player?.name || 'Player',
+        playerColor: player?.color,
+        actionType: 'edit_score',
+        description: desc,
+        points: scoreVal,
+        source: 'voice',
+      };
+      const updatedRecentActions = [actionItem, ...(gameState.recentActions || [])].slice(0, 20);
+
+      const updatedSheet = {
+        ...gameState.scores[activePlayerId],
+        [matchedCategory]: scoreVal,
+      };
+      const updatedScores = {
+        ...gameState.scores,
+        [activePlayerId]: updatedSheet,
+      };
+
+      const activeIdx = gameState.players.findIndex(p => p.id === activePlayerId);
+      const nextIdx = (activeIdx + 1) % gameState.players.length;
+      const nextPlayerId = gameState.players[nextIdx].id;
+
+      setGameState({
+        ...gameState,
+        scores: updatedScores,
+        activePlayerId: nextPlayerId,
+        recentActions: updatedRecentActions,
+      });
+      setEditingCell(null);
+    } else if (result.actionType === 'yahtzee_bonus') {
+      handleYahtzeeBonusChange(gameState.activePlayerId, true);
+    } else if (result.actionType === 'undo') {
+      handleUndo();
+    }
+  };
+
+  if (!gameState || !gameState.players || gameState.players.length === 0) {
+    if (isOnlineSynced) {
+      return (
+        <div className="flex flex-col items-center justify-center p-12 bg-slate-900/80 border-2 border-indigo-500/30 rounded-3xl text-center space-y-4 max-w-md mx-auto my-12 shadow-2xl">
+          <div className="w-14 h-14 rounded-2xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+            <Wifi className="w-7 h-7 animate-pulse" />
+          </div>
+          <h3 className="text-xl font-black text-white">Synchronizing Yahtzee Match...</h3>
+          <p className="text-sm text-slate-400">Connecting devices and syncing scorecards in real-time.</p>
+        </div>
+      );
+    }
+    return null;
+  }
+
+  const activePlayerObj = (gameState.players && gameState.players.find(p => p.id === gameState.activePlayerId)) ||
+    gameState.players[0] || { id: 'p1', name: 'Player 1', color: 'bg-emerald-500 text-white', avatar: '🎲' };
+
+  const yahtzeeGameSummaryText = (() => {
+    const sorted = [...(gameState.players || [])].sort((a, b) => calculateGrandTotal(gameState.scores?.[b.id]) - calculateGrandTotal(gameState.scores?.[a.id]));
+    const leader = sorted[0];
+    const topScore = calculateGrandTotal(gameState.scores?.[leader?.id]);
+    return `${leader?.name || 'Leader'} is leading with ${topScore} points. It is currently ${activePlayerObj?.name || 'Player'}'s turn!`;
+  })();
 
   return (
     <div className="space-y-6">
-      {/* Voice Command Bar */}
-      <VoiceCommandBar
+      {/* Integrated AI Voice Assistant */}
+      <VoiceAssistantWidget
         gameType="yahtzee"
-        activePlayerName={activePlayerObj?.name}
-        playerNames={gameState.players.map(p => p.name)}
-        onYahtzeeCommand={handleVoiceCommand}
+        activePlayerName={activePlayerObj?.name || 'Player'}
+        gameSummaryText={yahtzeeGameSummaryText}
+        onExecuteCommand={handleVoiceCommandInYahtzee}
       />
 
       {/* Top Bar info */}
@@ -604,6 +965,17 @@ export default function YahtzeeScorer({
             </select>
           </div>
 
+          {onOpenHouseRules && (
+            <button
+              onClick={onOpenHouseRules}
+              className="px-3.5 py-2 yz-themed-header border yz-row-border hover:opacity-80 yz-primary-text font-black rounded-full text-xs flex items-center gap-1.5 transition-colors cursor-pointer uppercase tracking-wider"
+              title="View or modify Yahtzee House Rules"
+            >
+              <Sliders className="w-3.5 h-3.5 yz-accent-text" />
+              <span>House Rules</span>
+            </button>
+          )}
+
           <button
             onClick={handleUndo}
             disabled={historyStack.length === 0}
@@ -621,6 +993,91 @@ export default function YahtzeeScorer({
             Reset Scorecard
           </button>
         </div>
+      </div>
+
+      {/* Recent Actions Log */}
+      <div className="yz-themed-card p-5 rounded-[32px] border-2 shadow-sm space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <Activity className="w-4 h-4 yz-accent-text" />
+            <h3 className="text-[11px] font-black yz-primary-text uppercase tracking-widest">
+              Recent Actions
+            </h3>
+            <span className="px-2 py-0.5 yz-themed-header text-[9px] font-black yz-muted-text rounded-full uppercase tracking-wider border yz-row-border">
+              Last 3 Updates
+            </span>
+          </div>
+          <button
+            onClick={toggleVoiceListening}
+            className={`px-3 py-1.5 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 shadow-xs ${
+              isListening
+                ? 'bg-purple-600 text-white animate-pulse ring-2 ring-purple-300'
+                : 'bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800/50'
+            }`}
+            title="Voice Score Input"
+          >
+            <Mic className="w-3.5 h-3.5" />
+            {isListening ? 'Listening...' : 'Voice Update'}
+          </button>
+        </div>
+
+        {voiceFeedback && (
+          <div className="p-2.5 bg-purple-50 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 border border-purple-200 dark:border-purple-800/50 rounded-xl text-xs font-bold text-center">
+            {voiceFeedback}
+          </div>
+        )}
+
+        {(!gameState.recentActions || gameState.recentActions.length === 0) ? (
+          <div className="text-center py-4 yz-muted-text text-xs font-semibold italic yz-themed-header rounded-2xl border border-dashed yz-row-border">
+            No score updates logged yet this game.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {gameState.recentActions.slice(0, 3).map((item) => {
+              const player = gameState.players.find(p => p.id === item.playerId);
+              const colorClass = (player?.color || item.playerColor || 'bg-amber-500').split(' ')[0];
+              return (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between p-3 yz-themed-header hover:opacity-90 rounded-2xl border yz-row-border transition-colors"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className={`w-6 h-6 rounded-full ${colorClass} text-white font-bold text-[10px] flex items-center justify-center shrink-0`}>
+                      {player?.avatar || item.playerName.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs yz-primary-text truncate">
+                          {item.playerName}
+                        </span>
+                        <span className="text-[10px] font-mono yz-muted-text">
+                          {item.timestamp}
+                        </span>
+                      </div>
+                      <p className="text-xs font-semibold yz-primary-text opacity-80 truncate">
+                        {item.description}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 ml-2">
+                    {item.source === 'voice' ? (
+                      <span className="px-2 py-0.5 bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50 rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center gap-1">
+                        <Mic className="w-2.5 h-2.5" />
+                        Voice
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center gap-1">
+                        <Hand className="w-2.5 h-2.5" />
+                        Manual
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Grid Layout of Scorecard */}
@@ -693,149 +1150,163 @@ export default function YahtzeeScorer({
                   Upper Section
                 </td>
               </tr>
-              {CATEGORIES.filter(c => c.isUpper).map(cat => (
-                <tr key={cat.key} className="border-b yz-row-border hover:opacity-90 group transition-colors">
-                  <td className="p-3 pl-5">
-                    <div className="font-bold yz-primary-text text-sm uppercase tracking-tight">{cat.label}</div>
-                    <div className="text-xs yz-muted-text font-medium opacity-80">{cat.desc}</div>
-                  </td>
-                  {gameState.players.map(player => {
-                    const val = gameState.scores[player.id][cat.key];
-                    const isActive = player.id === gameState.activePlayerId;
-                    return (
-                      <td
-                        key={player.id}
-                        onClick={() => handleCellClick(player.id, cat.key)}
-                        className={`p-3 text-center cursor-pointer transition-all ${
-                          isActive ? 'yz-active-column' : ''
-                        }`}
-                      >
-                        {val !== null ? (
-                          <span className="font-mono text-base font-black yz-primary-text">
-                            {val}
-                          </span>
-                        ) : (
-                          <span className="text-xs font-black yz-muted-text opacity-30 group-hover:opacity-100 transition-colors font-mono">
-                            --
-                          </span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+              {(() => {
+                const currentRules = getActiveRules();
+                return (
+                  <>
+                    {CATEGORIES.filter(c => c.isUpper).map(cat => (
+                      <tr key={cat.key} className="border-b yz-row-border hover:opacity-90 group transition-colors">
+                        <td className="p-3 pl-5">
+                          <div className="font-bold yz-primary-text text-sm uppercase tracking-tight">{cat.label}</div>
+                          <div className="text-xs yz-muted-text font-medium opacity-80">{getCategoryDescription(cat.key, currentRules)}</div>
+                        </td>
+                        {gameState.players.map(player => {
+                          const val = gameState.scores[player.id]?.[cat.key];
+                          const isActive = player.id === gameState.activePlayerId;
+                          return (
+                            <td
+                              key={player.id}
+                              onClick={() => handleCellClick(player.id, cat.key)}
+                              className={`p-3 text-center cursor-pointer transition-all ${
+                                isActive ? 'yz-active-column' : ''
+                              }`}
+                            >
+                              {typeof val === 'number' && !isNaN(val) ? (
+                                <span className="font-mono text-base font-black yz-primary-text">
+                                  {val}
+                                </span>
+                              ) : (
+                                <span className="text-xs font-black yz-muted-text opacity-30 group-hover:opacity-100 transition-colors font-mono">
+                                  --
+                                </span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
 
-              {/* UPPER SECTION SUBTOTALS */}
-              <tr className="border-b-2 yz-row-border yz-section-row font-bold">
-                <td className="p-3 pl-4">
-                  <div className="font-black yz-primary-text text-sm uppercase tracking-tight">Upper Subtotal</div>
-                  <div className="text-xs yz-muted-text font-medium opacity-80">Target ≥ 63 for bonus</div>
-                </td>
-                {gameState.players.map(player => {
-                  const sub = calculateSubtotal(gameState.scores[player.id]);
-                  return (
-                    <td key={player.id} className="p-3 text-center font-mono font-black yz-primary-text text-sm">
-                      {sub} / 63
-                    </td>
-                  );
-                })}
-              </tr>
-
-              <tr className="border-b-2 yz-row-border yz-section-row font-bold">
-                <td className="p-3 pl-4">
-                  <div className="font-black yz-primary-text text-sm uppercase tracking-tight">Upper Bonus</div>
-                  <div className="text-xs yz-muted-text font-medium opacity-80">+35 points if subtotal ≥ 63</div>
-                </td>
-                {gameState.players.map(player => {
-                  const bonus = calculateBonus(gameState.scores[player.id]);
-                  return (
-                    <td key={player.id} className="p-3 text-center">
-                      {bonus > 0 ? (
-                        <span className="px-2.5 py-0.5 bg-emerald-500 text-white font-mono font-black text-xs rounded-full shadow-sm">
-                          +35
-                        </span>
-                      ) : (
-                        <span className="font-mono yz-muted-text text-sm">0</span>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-
-              {/* LOWER SECTION */}
-              <tr className="yz-section-row">
-                <td colSpan={gameState.players.length + 1} className="px-4 py-2.5 text-[10px] font-black yz-section-text uppercase tracking-widest border-y yz-row-border">
-                  Lower Section
-                </td>
-              </tr>
-              {CATEGORIES.filter(c => !c.isUpper).map(cat => (
-                <tr key={cat.key} className="border-b yz-row-border hover:opacity-90 group transition-colors">
-                  <td className="p-3 pl-5">
-                    <div className="font-bold yz-primary-text text-sm uppercase tracking-tight">{cat.label}</div>
-                    <div className="text-xs yz-muted-text font-medium opacity-80">{cat.desc}</div>
-                  </td>
-                  {gameState.players.map(player => {
-                    const val = gameState.scores[player.id][cat.key];
-                    const isActive = player.id === gameState.activePlayerId;
-                    return (
-                      <td
-                        key={player.id}
-                        onClick={() => handleCellClick(player.id, cat.key)}
-                        className={`p-3 text-center cursor-pointer transition-all ${
-                          isActive ? 'yz-active-column' : ''
-                        }`}
-                      >
-                        {val !== null ? (
-                          <span className="font-mono text-base font-black yz-primary-text">
-                            {val}
-                          </span>
-                        ) : (
-                          <span className="text-xs font-black yz-muted-text opacity-30 group-hover:opacity-100 transition-colors font-mono">
-                            --
-                          </span>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-
-              {/* YAHTZEE BONUS COUNTER */}
-              <tr className="border-b yz-row-border transition-colors">
-                <td className="p-3 pl-5">
-                  <div className="font-bold yz-primary-text text-sm uppercase tracking-tight">Yahtzee Bonus</div>
-                  <div className="text-xs yz-muted-text font-medium opacity-80">+100 points per extra Yahtzee</div>
-                </td>
-                {gameState.players.map(player => {
-                  const sheet = gameState.scores[player.id];
-                  return (
-                    <td key={player.id} className="p-3 text-center">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <button
-                          onClick={() => handleYahtzeeBonusChange(player.id, false)}
-                          className="w-5 h-5 yz-themed-header border yz-row-border yz-primary-text font-black rounded-md flex items-center justify-center text-xs hover:opacity-80 transition-colors cursor-pointer"
-                        >
-                          -
-                        </button>
-                        <span className="font-mono font-black yz-primary-text text-sm">
-                          {sheet.yahtzeeBonusCount}
-                        </span>
-                        <button
-                          onClick={() => handleYahtzeeBonusChange(player.id, true)}
-                          className="w-5 h-5 yz-accent-bg text-white font-black rounded-md flex items-center justify-center text-xs hover:opacity-90 transition-colors cursor-pointer"
-                        >
-                          +
-                        </button>
-                      </div>
-                      {sheet.yahtzeeBonusCount > 0 && (
-                        <div className="text-[10px] yz-accent-text font-bold mt-1 uppercase tracking-wider">
-                          +{sheet.yahtzeeBonusCount * 100} pts
+                    {/* UPPER SECTION SUBTOTALS */}
+                    <tr className="border-b-2 yz-row-border yz-section-row font-bold">
+                      <td className="p-3 pl-4">
+                        <div className="font-black yz-primary-text text-sm uppercase tracking-tight">Upper Subtotal</div>
+                        <div className="text-xs yz-muted-text font-medium opacity-80">
+                          Target ≥ {currentRules.upperBonusThreshold ?? 63} for bonus
                         </div>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
+                      </td>
+                      {gameState.players.map(player => {
+                        const sub = calculateSubtotal(gameState.scores[player.id]);
+                        return (
+                          <td key={player.id} className="p-3 text-center font-mono font-black yz-primary-text text-sm">
+                            {sub} / {currentRules.upperBonusThreshold ?? 63}
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    <tr className="border-b-2 yz-row-border yz-section-row font-bold">
+                      <td className="p-3 pl-4">
+                        <div className="font-black yz-primary-text text-sm uppercase tracking-tight">Upper Bonus</div>
+                        <div className="text-xs yz-muted-text font-medium opacity-80">
+                          +{currentRules.upperBonusAmount ?? 35} points if subtotal ≥ {currentRules.upperBonusThreshold ?? 63}
+                        </div>
+                      </td>
+                      {gameState.players.map(player => {
+                        const bonus = calculateBonus(gameState.scores[player.id]);
+                        return (
+                          <td key={player.id} className="p-3 text-center">
+                            {bonus > 0 ? (
+                              <span className="px-2.5 py-0.5 bg-emerald-500 text-white font-mono font-black text-xs rounded-full shadow-sm">
+                                +{bonus}
+                              </span>
+                            ) : (
+                              <span className="font-mono yz-muted-text text-sm">0</span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    {/* LOWER SECTION */}
+                    <tr className="yz-section-row">
+                      <td colSpan={gameState.players.length + 1} className="px-4 py-2.5 text-[10px] font-black yz-section-text uppercase tracking-widest border-y yz-row-border">
+                        Lower Section
+                      </td>
+                    </tr>
+                    {CATEGORIES.filter(c => !c.isUpper).map(cat => (
+                      <tr key={cat.key} className="border-b yz-row-border hover:opacity-90 group transition-colors">
+                        <td className="p-3 pl-5">
+                          <div className="font-bold yz-primary-text text-sm uppercase tracking-tight">{cat.label}</div>
+                          <div className="text-xs yz-muted-text font-medium opacity-80">{getCategoryDescription(cat.key, currentRules)}</div>
+                        </td>
+                        {gameState.players.map(player => {
+                          const val = gameState.scores[player.id]?.[cat.key];
+                          const isActive = player.id === gameState.activePlayerId;
+                          return (
+                            <td
+                              key={player.id}
+                              onClick={() => handleCellClick(player.id, cat.key)}
+                              className={`p-3 text-center cursor-pointer transition-all ${
+                                isActive ? 'yz-active-column' : ''
+                              }`}
+                            >
+                              {typeof val === 'number' && !isNaN(val) ? (
+                                <span className="font-mono text-base font-black yz-primary-text">
+                                  {val}
+                                </span>
+                              ) : (
+                                <span className="text-xs font-black yz-muted-text opacity-30 group-hover:opacity-100 transition-colors font-mono">
+                                  --
+                                </span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+
+                    {/* YAHTZEE BONUS COUNTER */}
+                    <tr className="border-b yz-row-border transition-colors">
+                      <td className="p-3 pl-5">
+                        <div className="font-bold yz-primary-text text-sm uppercase tracking-tight">Yahtzee Bonus</div>
+                        <div className="text-xs yz-muted-text font-medium opacity-80">
+                          +{currentRules.extraYahtzeeBonus ?? 100} points per extra Yahtzee
+                        </div>
+                      </td>
+                      {gameState.players.map(player => {
+                        const sheet = gameState.scores[player.id];
+                        const bonusCount = Number(sheet?.yahtzeeBonusCount) || 0;
+                        return (
+                          <td key={player.id} className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                onClick={() => handleYahtzeeBonusChange(player.id, false)}
+                                className="w-5 h-5 yz-themed-header border yz-row-border yz-primary-text font-black rounded-md flex items-center justify-center text-xs hover:opacity-80 transition-colors cursor-pointer"
+                              >
+                                -
+                              </button>
+                              <span className="font-mono font-black yz-primary-text text-sm">
+                                {bonusCount}
+                              </span>
+                              <button
+                                onClick={() => handleYahtzeeBonusChange(player.id, true)}
+                                className="w-5 h-5 yz-accent-bg text-white font-black rounded-md flex items-center justify-center text-xs hover:opacity-90 transition-colors cursor-pointer"
+                              >
+                                +
+                              </button>
+                            </div>
+                            {bonusCount > 0 && (
+                              <div className="text-[10px] yz-accent-text font-bold mt-1 uppercase tracking-wider">
+                                +{bonusCount * (currentRules.extraYahtzeeBonus ?? 100)} pts
+                              </div>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  </>
+                );
+              })()}
 
               {/* GRAND TOTAL ROW */}
               <tr className="yz-grand-total-row font-bold border-t-4 border-black/10">

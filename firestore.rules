@@ -84,11 +84,6 @@ service cloud.firestore {
     }
 
     // Global Hall of Fame High Scores
-    match /test/{testId} {
-      allow read: if true;
-    }
-
-    // Global Hall of Fame High Scores
     match /hallOfFame/{recordId} {
       allow read, list, get: if true;
       allow create, update: if isValidId(recordId) && isValidHighScoreRecord(incoming());

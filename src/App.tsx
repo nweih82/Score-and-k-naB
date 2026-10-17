@@ -1,17 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { Player, GameType, GameHistoryEntry, SavedGameData, FarkleState, YahtzeeState, DominoesState, YahtzeePlayerScore } from './types';
+import { safeJsonStringify } from './lib/utils';
 
 function getYahtzeePlayerTotal(sheet: YahtzeePlayerScore): number {
   if (!sheet) return 0;
   const upperKeys: (keyof YahtzeePlayerScore)[] = ['aces', 'twos', 'threes', 'fours', 'fives', 'sixes'];
   const lowerKeys: (keyof YahtzeePlayerScore)[] = ['threeOfAKind', 'fourOfAKind', 'fullHouse', 'smallStraight', 'largeStraight', 'yahtzee', 'chance'];
   
-  const upperSum = upperKeys.reduce((sum, key) => sum + ((sheet[key] as number) || 0), 0);
+  const upperSum = upperKeys.reduce((sum, key) => {
+    const val = Number(sheet[key]);
+    return sum + (!isNaN(val) && sheet[key] !== null && sheet[key] !== undefined ? val : 0);
+  }, 0);
   const upperBonus = upperSum >= 63 ? 35 : 0;
-  const lowerSum = lowerKeys.reduce((sum, key) => sum + ((sheet[key] as number) || 0), 0);
-  const bonusYahtzee = (sheet.yahtzeeBonusCount || 0) * 100;
+  const lowerSum = lowerKeys.reduce((sum, key) => {
+    const val = Number(sheet[key]);
+    return sum + (!isNaN(val) && sheet[key] !== null && sheet[key] !== undefined ? val : 0);
+  }, 0);
+  const bonusCount = Number(sheet.yahtzeeBonusCount);
+  const bonusYahtzee = (!isNaN(bonusCount) && bonusCount > 0 ? bonusCount : 0) * 100;
   
-  return upperSum + upperBonus + lowerSum + bonusYahtzee;
+  const grand = upperSum + upperBonus + lowerSum + bonusYahtzee;
+  return isNaN(grand) ? 0 : grand;
 }
 
 function getYahtzeeFilledCount(sheet: YahtzeePlayerScore): number {
@@ -20,25 +29,29 @@ function getYahtzeeFilledCount(sheet: YahtzeePlayerScore): number {
     'aces', 'twos', 'threes', 'fours', 'fives', 'sixes',
     'threeOfAKind', 'fourOfAKind', 'fullHouse', 'smallStraight', 'largeStraight', 'yahtzee', 'chance'
   ];
-  return categories.reduce((count, key) => count + (sheet[key] !== null && sheet[key] !== undefined ? 1 : 0), 0);
+  return categories.reduce((count, key) => {
+    const val = Number(sheet[key]);
+    return count + (sheet[key] !== null && sheet[key] !== undefined && !isNaN(val) ? 1 : 0);
+  }, 0);
 }
 
 function getFarkleProgress(savedGame?: SavedGameData | null) {
   if (!savedGame || !savedGame.gameState) return null;
   const state = savedGame.gameState as FarkleState;
-  const target = state.targetScore || 10000;
+  const target = Math.max(100, Number(state.targetScore) || 10000);
   const scores = state.scores || {};
-  const maxScore = Math.max(...Object.values(scores), 0);
-  const percent = Math.min(100, Math.max(0, Math.round((maxScore / target) * 100)));
+  const numericScores = Object.values(scores).map(v => Number(v)).filter(v => !isNaN(v));
+  const maxScore = numericScores.length > 0 ? Math.max(...numericScores, 0) : 0;
+  const percent = target > 0 ? Math.min(100, Math.max(0, Math.round((maxScore / target) * 100))) : 0;
   
-  const leaderId = Object.keys(scores).find(id => scores[id] === maxScore);
+  const leaderId = Object.keys(scores).find(id => Number(scores[id]) === maxScore);
   const leader = state.players?.find(p => p.id === leaderId);
 
   return {
     leaderName: leader ? `${leader.avatar || '👤'} ${leader.name}` : 'Leader',
-    maxScore,
-    target,
-    percent,
+    maxScore: isNaN(maxScore) ? 0 : maxScore,
+    target: isNaN(target) ? 10000 : target,
+    percent: isNaN(percent) ? 0 : percent,
   };
 }
 
@@ -57,44 +70,45 @@ function getYahtzeeProgress(savedGame?: SavedGameData | null) {
     if (sheet) {
       const total = getYahtzeePlayerTotal(sheet);
       const filled = getYahtzeeFilledCount(sheet);
-      if (total >= maxScore) {
+      if (!isNaN(total) && total >= maxScore) {
         maxScore = total;
         leaderName = `${p.avatar || '👤'} ${p.name}`;
       }
-      if (filled > maxFilledBoxes) {
+      if (!isNaN(filled) && filled > maxFilledBoxes) {
         maxFilledBoxes = filled;
       }
     }
   });
 
   const targetBoxes = 13;
-  const percent = Math.min(100, Math.max(0, Math.round((maxFilledBoxes / targetBoxes) * 100)));
+  const percent = targetBoxes > 0 ? Math.min(100, Math.max(0, Math.round((maxFilledBoxes / targetBoxes) * 100))) : 0;
 
   return {
     leaderName,
-    maxScore,
-    filledCategories: maxFilledBoxes,
+    maxScore: isNaN(maxScore) ? 0 : maxScore,
+    filledCategories: isNaN(maxFilledBoxes) ? 0 : maxFilledBoxes,
     totalCategories: targetBoxes,
-    percent,
+    percent: isNaN(percent) ? 0 : percent,
   };
 }
 
 function getDominoesProgress(savedGame?: SavedGameData | null) {
   if (!savedGame || !savedGame.gameState) return null;
   const state = savedGame.gameState as DominoesState;
-  const target = state.targetScore || 200;
+  const target = Math.max(10, Number(state.targetScore) || 200);
   const scores = state.scores || {};
-  const maxScore = Math.max(...Object.values(scores), 0);
-  const percent = Math.min(100, Math.max(0, Math.round((maxScore / target) * 100)));
+  const numericScores = Object.values(scores).map(v => Number(v)).filter(v => !isNaN(v));
+  const maxScore = numericScores.length > 0 ? Math.max(...numericScores, 0) : 0;
+  const percent = target > 0 ? Math.min(100, Math.max(0, Math.round((maxScore / target) * 100))) : 0;
 
-  const leaderId = Object.keys(scores).find(id => scores[id] === maxScore);
+  const leaderId = Object.keys(scores).find(id => Number(scores[id]) === maxScore);
   const leader = state.players?.find(p => p.id === leaderId);
 
   return {
     leaderName: leader ? `${leader.avatar || '👤'} ${leader.name}` : 'Leader',
-    maxScore,
-    target,
-    percent,
+    maxScore: isNaN(maxScore) ? 0 : maxScore,
+    target: isNaN(target) ? 200 : target,
+    percent: isNaN(percent) ? 0 : percent,
   };
 }
 import PlayerManager from './components/PlayerManager';
@@ -109,10 +123,12 @@ import { ConfettiCelebration } from './components/ConfettiCelebration';
 import { OnlineRoomModal } from './components/OnlineRoomModal';
 import { OnlineSyncBar } from './components/OnlineSyncBar';
 import { AuthModal } from './components/AuthModal';
+import { HouseRulesSettingsModal } from './components/HouseRulesSettingsModal';
+import { loadActiveHouseRules } from './lib/houseRules';
 import { COLOR_THEMES } from './theme';
 import { FarkleLogo, YahtzeeLogo, DominoesLogo, BankAndScoreLogo, BankAndScoreHorizontalLogo } from './components/GameLogos';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trophy, Flame, Sparkles, HelpCircle, History, RefreshCw, X, Check, Gamepad2, Users, ScrollText, BarChart3, Save, BookmarkCheck, Play, Trash2, Clock, Sun, Moon, Palette, LogIn, LogOut, Cloud, CloudOff, Volume2, VolumeX, Tv, Wifi, Crown, Maximize2, Minimize2 } from 'lucide-react';
+import { Trophy, Flame, Sparkles, HelpCircle, History, RefreshCw, X, Check, Gamepad2, Users, ScrollText, BarChart3, Save, BookmarkCheck, Play, Trash2, Clock, Sun, Moon, Palette, LogIn, LogOut, Cloud, CloudOff, Volume2, VolumeX, Tv, Wifi, Crown, Maximize2, Minimize2, Sliders } from 'lucide-react';
 import { useSound } from './lib/SoundContext';
 import { useTv } from './lib/TvContext';
 import { TvRemoteBar } from './components/TvRemoteBar';
@@ -140,9 +156,9 @@ import {
 import { onAuthStateChanged, User } from 'firebase/auth';
 
 const DEFAULT_PLAYERS: Player[] = [
-  { id: '1', name: 'Nicholas', color: 'bg-rose-500 text-white' },
-  { id: '2', name: 'Alice', color: 'bg-sky-500 text-white' },
-  { id: '3', name: 'Bob', color: 'bg-emerald-500 text-white' },
+  { id: '1', name: 'Nicholas', color: 'bg-rose-500 text-white', avatar: '🍁' },
+  { id: '2', name: 'Alice', color: 'bg-sky-500 text-white', avatar: '🌿' },
+  { id: '3', name: 'Bob', color: 'bg-emerald-500 text-white', avatar: '🎲' },
 ];
 
 const launcherContainerVariants = {
@@ -184,6 +200,13 @@ export default function App() {
   });
 
   const [showThemeModal, setShowThemeModal] = useState(false);
+  const [showHouseRulesModal, setShowHouseRulesModal] = useState(false);
+  const [houseRulesTab, setHouseRulesTab] = useState<'farkle' | 'yahtzee'>('farkle');
+  const [activeHouseRules, setActiveHouseRules] = useState(() => loadActiveHouseRules());
+
+  const handleHouseRulesUpdated = () => {
+    setActiveHouseRules(loadActiveHouseRules());
+  };
 
   useEffect(() => {
     localStorage.setItem('bank_and_score_theme', theme);
@@ -256,7 +279,16 @@ export default function App() {
 
   const [players, setPlayers] = useState<Player[]>(() => {
     const saved = localStorage.getItem('scorekeeper_players');
-    return saved ? JSON.parse(saved) : DEFAULT_PLAYERS;
+    if (!saved) return DEFAULT_PLAYERS;
+    try {
+      const parsed: Player[] = JSON.parse(saved);
+      return parsed.map((p, idx) => ({
+        ...p,
+        avatar: p.avatar || (idx === 0 ? '🍁' : idx === 1 ? '🌿' : '🎲'),
+      }));
+    } catch {
+      return DEFAULT_PLAYERS;
+    }
   });
 
   const [activeGame, setActiveGame] = useState<GameType | null>(null);
@@ -264,7 +296,18 @@ export default function App() {
   
   const [gameHistory, setGameHistory] = useState<GameHistoryEntry[]>(() => {
     const saved = localStorage.getItem('scorekeeper_history');
-    return saved ? JSON.parse(saved) : [];
+    if (!saved) return [];
+    try {
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((entry: any) => ({
+        ...entry,
+        players: Array.isArray(entry.players) ? entry.players : [],
+        scores: entry.scores || {},
+      }));
+    } catch {
+      return [];
+    }
   });
 
   const [globalHallOfFame, setGlobalHallOfFame] = useState<HighScoreRecord[]>([]);
@@ -327,19 +370,45 @@ export default function App() {
 
     const unsub = subscribeToGameRoomInFirestore(activeRoom.code, (roomData) => {
       if (roomData) {
-        setActiveRoom(roomData);
-        if (roomData.gameType && roomData.gameType !== activeGame) {
-          setActiveGame(roomData.gameType);
+        setActiveRoom(prev => {
+          if (!prev) return roomData;
+          if (
+            prev.code === roomData.code &&
+            prev.updatedAt === roomData.updatedAt &&
+            prev.connectedPlayers?.length === roomData.connectedPlayers?.length &&
+            prev.lastActionBy === roomData.lastActionBy
+          ) {
+            return prev;
+          }
+          return roomData;
+        });
+        if (roomData.gameType) {
+          setActiveGame(prev => (prev !== roomData.gameType ? roomData.gameType : prev));
         }
-        if (roomData.gameState) {
-          setRoomExternalGameState(roomData.gameState);
+        if (roomData.gameState && Array.isArray(roomData.gameState.players) && roomData.gameState.players.length > 0) {
+          setRoomExternalGameState(prev => {
+            if (safeJsonStringify(prev) === safeJsonStringify(roomData.gameState)) {
+              return prev;
+            }
+            return roomData.gameState;
+          });
+          // Sync any new players into local players list so avatars and names are recognized
+          setPlayers(prevPlayers => {
+            const existingIds = new Set(prevPlayers.map(p => p.id));
+            const newOnes = (roomData.gameState.players as Player[]).filter(p => !existingIds.has(p.id));
+            if (newOnes.length > 0) {
+              return [...prevPlayers, ...newOnes];
+            }
+            return prevPlayers;
+          });
         }
         if (roomData.turnScore !== undefined) {
-          setRoomExternalTurnScore(roomData.turnScore);
+          setRoomExternalTurnScore(prev => prev === roomData.turnScore ? prev : roomData.turnScore);
         }
       } else {
         setActiveRoom(null);
         setRoomExternalGameState(null);
+        setRoomExternalTurnScore(null);
       }
     });
 
@@ -348,16 +417,21 @@ export default function App() {
 
   const handleSyncGameRoom = (newGameState: any, turnScore?: number | null) => {
     if (!activeRoom) return;
-    const currentPlayer = players.find(p => p.id === deviceId) || players[0];
+    const connected = activeRoom.connectedPlayers || [];
+    const currentPlayer = connected.find(p => p.deviceId === deviceId) ||
+      players.find(p => p.id === deviceId) ||
+      players[0];
     const actionBy = currentPlayer ? `${currentPlayer.name} updated score` : 'Score updated';
     updateGameRoomStateInFirestore(activeRoom.code, newGameState, turnScore ?? null, actionBy);
   };
 
   const handleLeaveRoom = async () => {
     if (!activeRoom) return;
-    await leaveGameRoomInFirestore(activeRoom.code, deviceId);
+    const code = activeRoom.code;
     setActiveRoom(null);
     setRoomExternalGameState(null);
+    setRoomExternalTurnScore(null);
+    await leaveGameRoomInFirestore(code, deviceId);
   };
 
   // Firestore Realtime Subscriptions
@@ -376,8 +450,13 @@ export default function App() {
 
     // 2. Subscribe to Game History
     const unsubHistory = subscribeToGameHistory(currentUser.uid, fsHistory => {
-      if (fsHistory.length > 0) {
-        setGameHistory(fsHistory);
+      const sanitized = (fsHistory || []).map((entry: any) => ({
+        ...entry,
+        players: Array.isArray(entry.players) ? entry.players : [],
+        scores: entry.scores || {},
+      }));
+      if (sanitized.length > 0) {
+        setGameHistory(sanitized);
       } else if (gameHistory.length > 0) {
         // First-time sync: push existing local history to Firestore
         gameHistory.forEach(h => saveGameHistoryToFirestore(currentUser.uid, h));
@@ -442,12 +521,12 @@ export default function App() {
 
   // Sync players to localStorage
   useEffect(() => {
-    localStorage.setItem('scorekeeper_players', JSON.stringify(players));
+    localStorage.setItem('scorekeeper_players', safeJsonStringify(players));
   }, [players]);
 
   // Sync history to localStorage
   useEffect(() => {
-    localStorage.setItem('scorekeeper_history', JSON.stringify(gameHistory));
+    localStorage.setItem('scorekeeper_history', safeJsonStringify(gameHistory));
   }, [gameHistory]);
 
   const handleAddPlayer = (name: string, color: string, avatar?: string) => {
@@ -455,7 +534,7 @@ export default function App() {
       id: Date.now().toString(),
       name,
       color,
-      avatar,
+      avatar: avatar || '🍁',
     };
     setPlayers(prev => [...prev, newPlayer]);
     if (currentUser) {
@@ -640,6 +719,23 @@ export default function App() {
             >
               <Tv className={`w-3.5 h-3.5 ${isTvMode ? 'text-white' : 'text-amber-400'}`} />
               <span className="hidden sm:inline">TV Mode</span>
+            </button>
+
+            <button
+              onClick={() => {
+                if (activeGame === 'yahtzee') {
+                  setHouseRulesTab('yahtzee');
+                } else {
+                  setHouseRulesTab('farkle');
+                }
+                setShowHouseRulesModal(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs rounded-full transition-all cursor-pointer border border-slate-700/80 shadow-sm"
+              title="Configure Game House Rules & Presets (Farkle & Yahtzee)"
+              aria-label="House Rules"
+            >
+              <Sliders className="w-3.5 h-3.5 text-orange-400" />
+              <span className="hidden sm:inline">Rules</span>
             </button>
 
             <button
@@ -978,15 +1074,41 @@ export default function App() {
                             >
                               New
                             </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHouseRulesTab('farkle');
+                                setShowHouseRulesModal(true);
+                              }}
+                              className="p-2.5 text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                              title="Customize Farkle House Rules"
+                              aria-label="Farkle House Rules"
+                            >
+                              <Sliders className="w-4 h-4" />
+                            </button>
                           </>
                         ) : (
-                          <button
-                            onClick={() => startNewMatch('farkle')}
-                            className="w-full py-2.5 text-xs font-black text-orange-500 hover:text-orange-600 dark:text-orange-400 dark:hover:text-orange-300 flex items-center justify-between uppercase tracking-wider cursor-pointer group/btn"
-                          >
-                            <span>Start Match</span>
-                            <span className="group-hover/btn:translate-x-1 transition-transform">→</span>
-                          </button>
+                          <div className="w-full flex items-center gap-2">
+                            <button
+                              onClick={() => startNewMatch('farkle')}
+                              className="flex-1 py-2.5 text-xs font-black text-orange-500 hover:text-orange-600 dark:text-orange-400 dark:hover:text-orange-300 flex items-center justify-between uppercase tracking-wider cursor-pointer group/btn"
+                            >
+                              <span>Start Match</span>
+                              <span className="group-hover/btn:translate-x-1 transition-transform">→</span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHouseRulesTab('farkle');
+                                setShowHouseRulesModal(true);
+                              }}
+                              className="p-2 text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-orange-50 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                              title="Customize Farkle House Rules"
+                              aria-label="Farkle House Rules"
+                            >
+                              <Sliders className="w-4 h-4" />
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1064,15 +1186,41 @@ export default function App() {
                             >
                               New
                             </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHouseRulesTab('yahtzee');
+                                setShowHouseRulesModal(true);
+                              }}
+                              className="p-2.5 text-slate-400 hover:text-teal-600 dark:hover:text-teal-400 hover:bg-teal-50 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                              title="Customize Yahtzee House Rules"
+                              aria-label="Yahtzee House Rules"
+                            >
+                              <Sliders className="w-4 h-4" />
+                            </button>
                           </>
                         ) : (
-                          <button
-                            onClick={() => startNewMatch('yahtzee')}
-                            className="w-full py-2.5 text-xs font-black text-teal-600 hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-300 flex items-center justify-between uppercase tracking-wider cursor-pointer group/btn"
-                          >
-                            <span>Start Match</span>
-                            <span className="group-hover/btn:translate-x-1 transition-transform">→</span>
-                          </button>
+                          <div className="w-full flex items-center gap-2">
+                            <button
+                              onClick={() => startNewMatch('yahtzee')}
+                              className="flex-1 py-2.5 text-xs font-black text-teal-600 hover:text-teal-700 dark:text-teal-400 dark:hover:text-teal-300 flex items-center justify-between uppercase tracking-wider cursor-pointer group/btn"
+                            >
+                              <span>Start Match</span>
+                              <span className="group-hover/btn:translate-x-1 transition-transform">→</span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHouseRulesTab('yahtzee');
+                                setShowHouseRulesModal(true);
+                              }}
+                              className="p-2 text-slate-400 hover:text-teal-600 dark:hover:text-teal-400 hover:bg-teal-50 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                              title="Customize Yahtzee House Rules"
+                              aria-label="Yahtzee House Rules"
+                            >
+                              <Sliders className="w-4 h-4" />
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1260,7 +1408,7 @@ export default function App() {
                               <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                                 Participants:{' '}
                                 <strong className="font-bold text-slate-600 dark:text-slate-300">
-                                  {entry.players.map(p => p.name).join(', ')}
+                                  {(entry.players || []).map(p => p.name).join(', ') || 'None'}
                                 </strong>
                               </div>
                             </div>
@@ -1318,6 +1466,11 @@ export default function App() {
                       externalTurnScore={roomExternalTurnScore}
                       onSyncGameRoom={handleSyncGameRoom}
                       isOnlineSynced={!!activeRoom}
+                      houseRules={activeHouseRules.farkle}
+                      onOpenHouseRules={() => {
+                        setHouseRulesTab('farkle');
+                        setShowHouseRulesModal(true);
+                      }}
                     />
                   </motion.div>
                 )}
@@ -1336,6 +1489,11 @@ export default function App() {
                       externalGameState={roomExternalGameState}
                       onSyncGameRoom={handleSyncGameRoom}
                       isOnlineSynced={!!activeRoom}
+                      houseRules={activeHouseRules.yahtzee}
+                      onOpenHouseRules={() => {
+                        setHouseRulesTab('yahtzee');
+                        setShowHouseRulesModal(true);
+                      }}
                     />
                   </motion.div>
                 )}
@@ -1580,6 +1738,14 @@ export default function App() {
         onSelectColorTheme={(themeId) => setColorTheme(themeId)}
         isDarkMode={theme === 'dark'}
         onToggleDarkMode={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
+      />
+
+      {/* HOUSE RULES SETTINGS & PRESETS MODAL */}
+      <HouseRulesSettingsModal
+        isOpen={showHouseRulesModal}
+        onClose={() => setShowHouseRulesModal(false)}
+        initialTab={houseRulesTab}
+        onRulesUpdated={handleHouseRulesUpdated}
       />
 
       {/* ANDROID TV REMOTE HUD BAR */}

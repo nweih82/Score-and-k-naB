@@ -37,15 +37,19 @@ export default function PlayerStatistics({ players, gameHistory }: PlayerStatist
   // Build unique map of all players (current roster + any historical players)
   const playerMap = new Map<string, { player: Player; isCurrent: boolean }>();
   
-  players.forEach(p => {
-    playerMap.set(p.id, { player: p, isCurrent: true });
+  (players || []).forEach(p => {
+    if (p && p.id) {
+      playerMap.set(p.id, { player: p, isCurrent: true });
+    }
   });
 
-  gameHistory.forEach(entry => {
-    entry.players.forEach(hp => {
-      if (!playerMap.has(hp.id)) {
+  (gameHistory || []).forEach(entry => {
+    if (!entry) return;
+    const entryPlayers = Array.isArray(entry.players) ? entry.players : [];
+    entryPlayers.forEach(hp => {
+      if (hp && hp.id && !playerMap.has(hp.id)) {
         // Find if matches by name if ID was regenerated
-        const matchedCurrent = players.find(p => p.name.toLowerCase() === hp.name.toLowerCase());
+        const matchedCurrent = (players || []).find(p => p && p.name && hp.name && p.name.toLowerCase() === hp.name.toLowerCase());
         if (matchedCurrent) {
           playerMap.set(matchedCurrent.id, { player: matchedCurrent, isCurrent: true });
         } else {
@@ -58,12 +62,16 @@ export default function PlayerStatistics({ players, gameHistory }: PlayerStatist
   // Calculate statistics for each tracked player
   const statsList: PlayerStat[] = Array.from(playerMap.values()).map(({ player, isCurrent }) => {
     // Filter history entries involving this player
-    const playerEntries = gameHistory.filter(entry => {
+    const playerEntries = (gameHistory || []).filter(entry => {
+      if (!entry) return false;
       if (gameFilter !== 'all' && entry.gameType !== gameFilter) return false;
 
+      const scores = entry.scores || {};
+      const entryPlayers = Array.isArray(entry.players) ? entry.players : [];
+
       // Check if player ID or name exists in entry
-      const hasId = entry.scores[player.id] !== undefined;
-      const hasName = entry.players.some(hp => hp.name.toLowerCase() === player.name.toLowerCase());
+      const hasId = scores[player.id] !== undefined;
+      const hasName = entryPlayers.some(hp => hp && hp.name && player.name && hp.name.toLowerCase() === player.name.toLowerCase());
       return hasId || hasName;
     });
 
@@ -71,10 +79,10 @@ export default function PlayerStatistics({ players, gameHistory }: PlayerStatist
 
     // Calculate wins
     const totalWins = playerEntries.filter(entry => {
-      return entry.winner.toLowerCase() === player.name.toLowerCase();
+      return (entry.winner || '').toLowerCase() === (player.name || '').toLowerCase();
     }).length;
 
-    const winRate = totalGames > 0 ? Math.round((totalWins / totalGames) * 100) : 0;
+    const winRate = totalGames > 0 ? Math.min(100, Math.max(0, Math.round((totalWins / totalGames) * 100))) : 0;
 
     let highestScore = 0;
     let highestScoreGameType: GameType | null = null;
@@ -92,24 +100,29 @@ export default function PlayerStatistics({ players, gameHistory }: PlayerStatist
     };
 
     playerEntries.forEach(entry => {
-      let score = entry.scores[player.id];
+      const scores = entry.scores || {};
+      const entryPlayers = Array.isArray(entry.players) ? entry.players : [];
+      let score = scores[player.id];
       if (score === undefined) {
-        const matchingPlayer = entry.players.find(hp => hp.name.toLowerCase() === player.name.toLowerCase());
+        const matchingPlayer = entryPlayers.find(hp => hp && hp.name && player.name && hp.name.toLowerCase() === player.name.toLowerCase());
         if (matchingPlayer) {
-          score = entry.scores[matchingPlayer.id] || 0;
+          score = scores[matchingPlayer.id] || 0;
         } else {
           score = 0;
         }
       }
 
+      const numScore = Number(score);
+      const safeScore = !isNaN(numScore) ? numScore : 0;
+
       gamesByGame[entry.gameType] = (gamesByGame[entry.gameType] || 0) + 1;
 
-      if (score > highScoreByGame[entry.gameType]) {
-        highScoreByGame[entry.gameType] = score;
+      if (safeScore > highScoreByGame[entry.gameType]) {
+        highScoreByGame[entry.gameType] = safeScore;
       }
 
-      if (score > highestScore) {
-        highestScore = score;
+      if (safeScore > highestScore) {
+        highestScore = safeScore;
         highestScoreGameType = entry.gameType;
       }
     });
@@ -117,10 +130,10 @@ export default function PlayerStatistics({ players, gameHistory }: PlayerStatist
     return {
       player,
       isCurrentRoster: isCurrent,
-      totalGames,
-      totalWins,
-      winRate,
-      highestScore,
+      totalGames: isNaN(totalGames) ? 0 : totalGames,
+      totalWins: isNaN(totalWins) ? 0 : totalWins,
+      winRate: isNaN(winRate) ? 0 : winRate,
+      highestScore: isNaN(highestScore) ? 0 : highestScore,
       highestScoreGameType,
       highScoreByGame,
       gamesByGame,

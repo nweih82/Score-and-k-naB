@@ -13,16 +13,19 @@ export const HallOfFame: React.FC<HallOfFameProps> = ({ gameHistory, globalRecor
 
   // Extract all individual player high scores from gameHistory
   const localRecords: HighScoreRecord[] = [];
-  gameHistory.forEach(entry => {
+  (gameHistory || []).forEach(entry => {
+    if (!entry) return;
+    const entryPlayers = Array.isArray(entry.players) ? entry.players : [];
     Object.entries(entry.scores || {}).forEach(([playerId, score]) => {
-      const playerObj = entry.players.find(p => p.id === playerId);
+      const playerObj = entryPlayers.find(p => p && p.id === playerId);
       const name = playerObj?.name || 'Player';
+      const parsedScore = Number(score);
       localRecords.push({
         id: `local-${entry.id}-${playerId}`,
         playerName: name,
         playerAvatar: playerObj?.avatar || '🎲',
         playerColor: playerObj?.color || 'bg-emerald-500',
-        score: Number(score) || 0,
+        score: !isNaN(parsedScore) ? parsedScore : 0,
         gameType: entry.gameType,
         date: entry.date,
         isWinner: entry.winner === name,
@@ -32,10 +35,15 @@ export const HallOfFame: React.FC<HallOfFameProps> = ({ gameHistory, globalRecor
 
   // Combine local records and global records, deduplicating by ID or exact match
   const recordMap = new Map<string, HighScoreRecord>();
-  [...localRecords, ...globalRecords].forEach(rec => {
-    const key = `${rec.playerName.toLowerCase()}-${rec.gameType}-${rec.score}-${rec.date}`;
+  [...localRecords, ...(globalRecords || [])].forEach(rec => {
+    if (!rec) return;
+    const safePlayerName = (rec.playerName || 'Player').toLowerCase();
+    const parsedScore = Number(rec.score);
+    const safeScore = !isNaN(parsedScore) ? parsedScore : 0;
+    const safeRec = { ...rec, score: safeScore };
+    const key = `${safePlayerName}-${rec.gameType || 'farkle'}-${safeScore}-${rec.date || ''}`;
     if (!recordMap.has(key)) {
-      recordMap.set(key, rec);
+      recordMap.set(key, safeRec);
     }
   });
 

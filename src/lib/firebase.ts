@@ -28,6 +28,7 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Player, GameHistoryEntry, SavedGameData, GameType, GameRoomData, ConnectedPlayer, HighScoreRecord } from '../types';
+import { safeClone } from './utils';
 
 export const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(app, {
@@ -89,7 +90,9 @@ export async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
-    console.warn('Firestore connection check notice:', error instanceof Error ? error.message : error);
+    if (error instanceof Error && (error.message.includes('the client is offline') || error.message.includes('unavailable') || error.message.includes('Could not reach'))) {
+      console.warn('Firestore notice during initial connection check:', error.message);
+    }
   }
 }
 
@@ -374,6 +377,63 @@ export async function deleteSavedGameFromFirestore(userId: string, gameType: Gam
   }
 }
 
+// Helper to generate a complete, valid initial game state for multiplayer rooms
+export function createDefaultGameStateForRoom(gameType: GameType, initialPlayers: Player[]) {
+  const players = initialPlayers.length > 0 ? initialPlayers : [
+    { id: 'p-1', name: 'Player 1', color: 'bg-emerald-500 text-white', avatar: '🍁' }
+  ];
+
+  if (gameType === 'farkle') {
+    const scores: Record<string, number> = {};
+    players.forEach(p => { scores[p.id] = 0; });
+    return {
+      players,
+      scores,
+      rounds: [],
+      currentRound: 1,
+      targetScore: 10000,
+      winnerId: null,
+      activePlayerId: players[0].id,
+      turnHistory: [],
+      recentActions: [],
+    };
+  }
+
+  if (gameType === 'yahtzee') {
+    const scores: Record<string, any> = {};
+    players.forEach(p => {
+      scores[p.id] = {
+        aces: null, twos: null, threes: null, fours: null, fives: null, sixes: null,
+        threeOfAKind: null, fourOfAKind: null, fullHouse: null, smallStraight: null,
+        largeStraight: null, yahtzee: null, chance: null, yahtzeeBonusCount: 0,
+      };
+    });
+    return {
+      players,
+      scores,
+      activePlayerId: players[0].id,
+      winnerId: null,
+      isCompleted: false,
+      recentActions: [],
+    };
+  }
+
+  if (gameType === 'dominoes') {
+    const scores: Record<string, number> = {};
+    players.forEach(p => { scores[p.id] = 0; });
+    return {
+      players,
+      scores,
+      rounds: [],
+      targetScore: 200,
+      winnerId: null,
+      activePlayerId: players[0].id,
+    };
+  }
+
+  return null;
+}
+
 // LIVE ONLINE ROOM MULTIPLAYER SYNC
 export async function createGameRoomInFirestore(
   code: string,
@@ -387,23 +447,47 @@ export async function createGameRoomInFirestore(
   const normalizedCode = code.toUpperCase().trim();
   const path = `rooms/${normalizedCode}`;
 
+  const host: Player = hostPlayer ? {
+    ...hostPlayer,
+    id: hostPlayer.id || `p-${hostId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}`,
+  } : {
+    id: `p-${hostId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}`,
+    name: hostName || 'Host',
+    avatar: '👑',
+    color: 'bg-amber-500 text-white',
+  };
+
   const hostConnected: ConnectedPlayer = {
-    id: hostPlayer?.id || hostId,
-    name: hostName || hostPlayer?.name || 'Host',
-    avatar: hostPlayer?.avatar || '👑',
-    color: hostPlayer?.color || 'bg-amber-500 text-white',
+    id: host.id,
+    name: host.name,
+    avatar: host.avatar || '👑',
+    color: host.color || 'bg-amber-500 text-white',
     deviceId: hostId,
     lastSeen: new Date().toISOString(),
   };
 
+  // Ensure gameState is a full, valid, playable state
+  let initialGameState = gameState;
+  if (!initialGameState || !Array.isArray(initialGameState.players) || initialGameState.players.length === 0) {
+    initialGameState = createDefaultGameStateForRoom(gameType, [host]);
+  } else {
+    // Make sure host player is part of the player list
+    if (!initialGameState.players.some((p: Player) => p.id === host.id)) {
+      initialGameState = {
+        ...initialGameState,
+        players: [host, ...initialGameState.players],
+      };
+    }
+  }
+
   const roomData: GameRoomData = {
     code: normalizedCode,
     gameType,
-    gameState,
+    gameState: initialGameState,
     turnScore: turnScore ?? null,
     hostId,
-    hostName: hostName || 'Host',
-    lastActionBy: `${hostName} created room ${normalizedCode}`,
+    hostName: hostName || host.name || 'Host',
+    lastActionBy: `${host.name} created room ${normalizedCode}`,
     connectedPlayers: [hostConnected],
     updatedAt: new Date().toISOString(),
   };
@@ -456,15 +540,30 @@ export async function joinGameRoomInFirestore(
     }
 
     const roomData = snap.data() as GameRoomData;
-    const connected = roomData.connectedPlayers || [];
+    const connected = Array.isArray(roomData.connectedPlayers) ? roomData.connectedPlayers : [];
 
-    // Check if player already connected or add them
-    const existingIndex = connected.findIndex(p => p.deviceId === deviceId || p.id === player.id);
-    const newConnectedPlayer: ConnectedPlayer = {
-      id: player.id,
-      name: player.name,
+    // Find if this device is already in connectedPlayers
+    const existingIndex = connected.findIndex(p => p.deviceId === deviceId);
+
+    // Prevent ID collision with other devices that might also use '1' or 'p1'
+    let assignedPlayerId = player.id;
+    const isIdTaken = connected.some(cp => cp.deviceId !== deviceId && cp.id === assignedPlayerId);
+    if (isIdTaken || !assignedPlayerId || assignedPlayerId === '1' || assignedPlayerId === 'p1') {
+      assignedPlayerId = `p-${deviceId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}`;
+    }
+
+    const joiningPlayer: Player = {
+      id: assignedPlayerId,
+      name: player.name || `Player ${connected.length + 1}`,
       avatar: player.avatar || '🎲',
       color: player.color || 'bg-blue-500 text-white',
+    };
+
+    const newConnectedPlayer: ConnectedPlayer = {
+      id: joiningPlayer.id,
+      name: joiningPlayer.name,
+      avatar: joiningPlayer.avatar,
+      color: joiningPlayer.color,
       deviceId,
       lastSeen: new Date().toISOString(),
     };
@@ -476,23 +575,57 @@ export async function joinGameRoomInFirestore(
       updatedConnected.push(newConnectedPlayer);
     }
 
-    // Check if player is present in room's gameState.players array, if not add them!
-    const gameState = { ...roomData.gameState } as any;
-    if (gameState && Array.isArray(gameState.players)) {
-      const hasPlayer = gameState.players.some((p: Player) => p.id === player.id);
-      if (!hasPlayer) {
-        gameState.players = [...gameState.players, player];
-        if (gameState.scores && gameState.scores[player.id] === undefined) {
-          if (roomData.gameType === 'yahtzee') {
-            gameState.scores[player.id] = {
-              aces: null, twos: null, threes: null, fours: null, fives: null, sixes: null,
-              threeOfAKind: null, fourOfAKind: null, fullHouse: null, smallStraight: null,
-              largeStraight: null, yahtzee: null, chance: null, yahtzeeBonusCount: 0,
-            };
-          } else {
-            gameState.scores[player.id] = 0;
-          }
+    // Ensure gameState is guaranteed valid and contains joiningPlayer
+    let gameState = roomData.gameState ? safeClone(roomData.gameState) : null;
+    if (!gameState || !Array.isArray(gameState.players) || gameState.players.length === 0) {
+      // Reconstruct gameState from connected players
+      const allPlayers: Player[] = updatedConnected.map(cp => ({
+        id: cp.id,
+        name: cp.name,
+        avatar: cp.avatar || '🎲',
+        color: cp.color || 'bg-emerald-500 text-white',
+      }));
+      gameState = createDefaultGameStateForRoom(roomData.gameType, allPlayers);
+    } else {
+      // Add or update joiningPlayer in gameState.players
+      const playerIdx = gameState.players.findIndex(
+        (p: Player) => p.id === joiningPlayer.id || (p.name.toLowerCase() === joiningPlayer.name.toLowerCase() && p.name !== 'Player 1' && p.name !== 'Player 2')
+      );
+      if (playerIdx === -1) {
+        gameState.players = [...gameState.players, joiningPlayer];
+      } else {
+        gameState.players[playerIdx] = { ...gameState.players[playerIdx], ...joiningPlayer };
+      }
+
+      // Initialize scores for joining player if not present
+      if (!gameState.scores) gameState.scores = {};
+      if (roomData.gameType === 'yahtzee') {
+        if (!gameState.scores[joiningPlayer.id]) {
+          gameState.scores[joiningPlayer.id] = {
+            aces: null, twos: null, threes: null, fours: null, fives: null, sixes: null,
+            threeOfAKind: null, fourOfAKind: null, fullHouse: null, smallStraight: null,
+            largeStraight: null, yahtzee: null, chance: null, yahtzeeBonusCount: 0,
+          };
         }
+      } else {
+        if (gameState.scores[joiningPlayer.id] === undefined) {
+          gameState.scores[joiningPlayer.id] = 0;
+        }
+        const anyState = gameState as any;
+        if (Array.isArray(anyState.rounds)) {
+          anyState.rounds.forEach((r: any) => {
+            if (r.scores && r.scores[joiningPlayer.id] === undefined) {
+              r.scores[joiningPlayer.id] = 0;
+            }
+            if (r.farkles && r.farkles[joiningPlayer.id] === undefined) {
+              r.farkles[joiningPlayer.id] = false;
+            }
+          });
+        }
+      }
+
+      if (!gameState.activePlayerId || !gameState.players.some((p: Player) => p.id === gameState.activePlayerId)) {
+        gameState.activePlayerId = gameState.players[0]?.id || joiningPlayer.id;
       }
     }
 
@@ -500,7 +633,7 @@ export async function joinGameRoomInFirestore(
       ...roomData,
       gameState,
       connectedPlayers: updatedConnected,
-      lastActionBy: `${player.name} joined room`,
+      lastActionBy: `${joiningPlayer.name} joined room`,
       updatedAt: new Date().toISOString(),
     };
 
@@ -521,6 +654,12 @@ export async function updateGameRoomStateInFirestore(
   turnScore?: number | null,
   actionBy?: string
 ) {
+  // Validate that gameState is a valid object with players before sending to Firestore
+  if (!gameState || !Array.isArray(gameState.players) || gameState.players.length === 0) {
+    console.warn('Attempted to sync empty/invalid gameState to room, skipping update.');
+    return;
+  }
+
   const normalizedCode = code.toUpperCase().trim();
   const path = `rooms/${normalizedCode}`;
 

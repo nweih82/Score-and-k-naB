@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Player, DominoesState, DominoesRound } from '../types';
-import { Play, RotateCcw, ChevronRight, Hash, Trash2, Award, Plus, Check, UserPlus, X, AlertCircle, Undo } from 'lucide-react';
+import { Play, RotateCcw, ChevronRight, Hash, Trash2, Award, Plus, Check, UserPlus, X, AlertCircle, Undo, Wifi } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, saveActiveGameToFirestore, deleteSavedGameFromFirestore } from '../lib/firebase';
 import { useSound } from '../lib/SoundContext';
+import { safeClone, safeJsonStringify } from '../lib/utils';
 
 interface DominoesScorerProps {
   players: Player[];
@@ -23,15 +24,25 @@ export default function DominoesScorer({
   isOnlineSynced,
 }: DominoesScorerProps) {
   const { playBank, playUndo } = useSound();
-  const [gameState, setGameState] = useState<DominoesState | null>(null);
+  const [gameState, setGameState] = useState<DominoesState | null>(() => {
+    if (externalGameState && Array.isArray(externalGameState.players) && externalGameState.players.length > 0) {
+      return externalGameState;
+    }
+    return null;
+  });
   const [historyStack, setHistoryStack] = useState<DominoesState[]>([]);
-  const [isSettingUp, setIsSettingUp] = useState(true);
+  const [isSettingUp, setIsSettingUp] = useState<boolean>(() => {
+    if (externalGameState && Array.isArray(externalGameState.players) && externalGameState.players.length > 0) {
+      return false;
+    }
+    return true;
+  });
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
   const [targetScoreInput, setTargetScoreInput] = useState(200);
 
   const pushStateToHistory = () => {
     if (gameState) {
-      setHistoryStack(prev => [...prev, JSON.parse(JSON.stringify(gameState))]);
+      setHistoryStack(prev => [...prev, safeClone(gameState)]);
     }
   };
 
@@ -56,8 +67,11 @@ export default function DominoesScorer({
   // Quick Score entry state
   const [activeScoreInput, setActiveScoreInput] = useState('');
 
-  // Check for saved game on mount
+  // Check for saved game on mount (ONLY for local/offline mode, not when connected to an online room)
   useEffect(() => {
+    if (isOnlineSynced || (externalGameState && Array.isArray(externalGameState.players) && externalGameState.players.length > 0)) {
+      return;
+    }
     const saved = localStorage.getItem('scorekeeper_saved_dominoes');
     if (saved) {
       try {
@@ -70,41 +84,81 @@ export default function DominoesScorer({
         console.error("Error loading saved Dominoes game", err);
       }
     }
-  }, []);
+  }, [isOnlineSynced]);
+
+  const isIncomingSyncRef = useRef<boolean>(false);
+  const lastReceivedExternalJsonRef = useRef<string>(
+    externalGameState && Array.isArray(externalGameState.players) && externalGameState.players.length > 0
+      ? safeJsonStringify({ gameState: externalGameState })
+      : ''
+  );
 
   // Listen to external online game room updates
   useEffect(() => {
-    if (externalGameState) {
-      setGameState(externalGameState);
-      setIsSettingUp(false);
+    if (!externalGameState || !Array.isArray(externalGameState.players) || externalGameState.players.length === 0) {
+      return;
     }
+
+    const incomingJson = safeJsonStringify({ gameState: externalGameState });
+
+    // If identical to what we already recorded as the external state, ignore
+    if (incomingJson === lastReceivedExternalJsonRef.current) {
+      return;
+    }
+
+    // Also compare against current local state to avoid setting identical state
+    const currentJson = safeJsonStringify({ gameState });
+    if (incomingJson === currentJson) {
+      lastReceivedExternalJsonRef.current = incomingJson;
+      return;
+    }
+
+    // Mark as incoming sync so the local change effect will NOT echo back to Firestore
+    isIncomingSyncRef.current = true;
+    lastReceivedExternalJsonRef.current = incomingJson;
+
+    setGameState(externalGameState);
+    setIsSettingUp(false);
   }, [externalGameState]);
 
   // Save game progress automatically whenever gameState changes
   useEffect(() => {
-    if (gameState) {
-      if (gameState.winnerId) {
-        localStorage.removeItem('scorekeeper_saved_dominoes');
-        if (auth.currentUser) {
-          deleteSavedGameFromFirestore(auth.currentUser.uid, 'dominoes');
-        }
-      } else {
-        const savedData = {
-          gameType: 'dominoes' as const,
-          gameState,
-          updatedAt: new Date().toISOString(),
-        };
-        localStorage.setItem('scorekeeper_saved_dominoes', JSON.stringify(savedData));
-        if (auth.currentUser) {
-          saveActiveGameToFirestore(auth.currentUser.uid, 'dominoes', savedData);
+    if (gameState && Array.isArray(gameState.players) && gameState.players.length > 0) {
+      // If this state update was received from the external room, do not echo back or overwrite local solo save
+      if (isIncomingSyncRef.current) {
+        isIncomingSyncRef.current = false;
+        return;
+      }
+
+      if (!isOnlineSynced) {
+        if (gameState.winnerId) {
+          localStorage.removeItem('scorekeeper_saved_dominoes');
+          if (auth.currentUser) {
+            deleteSavedGameFromFirestore(auth.currentUser.uid, 'dominoes');
+          }
+        } else {
+          const savedData = {
+            gameType: 'dominoes' as const,
+            gameState,
+            updatedAt: new Date().toISOString(),
+          };
+          localStorage.setItem('scorekeeper_saved_dominoes', safeJsonStringify(savedData));
+          if (auth.currentUser) {
+            saveActiveGameToFirestore(auth.currentUser.uid, 'dominoes', savedData);
+          }
         }
       }
 
-      if (onSyncGameRoom) {
-        onSyncGameRoom(gameState);
+      // Check if this update came from external sync before echoing to Firestore
+      if (isOnlineSynced && onSyncGameRoom) {
+        const currentJson = safeJsonStringify({ gameState });
+        if (currentJson !== lastReceivedExternalJsonRef.current) {
+          lastReceivedExternalJsonRef.current = currentJson;
+          onSyncGameRoom(gameState);
+        }
       }
     }
-  }, [gameState]);
+  }, [gameState, isOnlineSynced]);
 
   const removePlayerFromActiveGame = (playerId: string) => {
     if (!gameState) return;
@@ -461,9 +515,23 @@ export default function DominoesScorer({
     );
   }
 
-  if (!gameState) return null;
+  if (!gameState || !gameState.players || gameState.players.length === 0) {
+    if (isOnlineSynced) {
+      return (
+        <div className="flex flex-col items-center justify-center p-12 bg-slate-900/80 border-2 border-teal-500/30 rounded-3xl text-center space-y-4 max-w-md mx-auto my-12 shadow-2xl">
+          <div className="w-14 h-14 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-teal-400">
+            <Wifi className="w-7 h-7 animate-pulse" />
+          </div>
+          <h3 className="text-xl font-black text-white">Synchronizing Dominoes Match...</h3>
+          <p className="text-sm text-slate-400">Connecting devices and syncing players and scores in real-time.</p>
+        </div>
+      );
+    }
+    return null;
+  }
 
-  const activePlayer = gameState.players.find(p => p.id === gameState.activePlayerId)!;
+  const activePlayer = (gameState.players && gameState.players.find(p => p.id === gameState.activePlayerId)) ||
+    gameState.players[0] || { id: 'p1', name: 'Player 1', color: 'bg-teal-500 text-white', avatar: '🀄' };
 
   return (
     <div className="grid grid-cols-1 landscape:grid-cols-12 md:grid-cols-12 gap-6">
@@ -501,30 +569,34 @@ export default function DominoesScorer({
               <div className="text-right">
                 <div className="text-[9px] text-teal-100 font-bold uppercase tracking-widest">Player Total</div>
                 <div className="font-mono text-xl font-black text-yellow-300">
-                  {gameState.scores[activePlayer.id] || 0} / {gameState.targetScore}
+                  {Number(gameState.scores[activePlayer.id]) || 0} / {Number(gameState.targetScore) || 200}
                 </div>
               </div>
             </div>
           </div>
 
           {/* Target Score Progress Bar */}
-          <div className="mt-6 pt-4 border-t border-teal-500/30">
-            <div className="flex justify-between text-xs text-teal-100 mb-1.5 font-bold uppercase tracking-wider">
-              <span>Target: {gameState.targetScore} pts</span>
-              <span>{Math.round(((gameState.scores[activePlayer.id] || 0) / gameState.targetScore) * 100)}% to win</span>
-            </div>
-            <div className="w-full h-2.5 bg-teal-800/80 rounded-full overflow-hidden">
-              <div
-                className="h-full transition-all duration-300 bg-yellow-400"
-                style={{
-                  width: `${Math.min(
-                    100,
-                    ((gameState.scores[activePlayer.id] || 0) / gameState.targetScore) * 100
-                  )}%`,
-                }}
-              />
-            </div>
-          </div>
+          {(() => {
+            const target = Math.max(1, Number(gameState.targetScore) || 200);
+            const currentScore = Number(gameState.scores[activePlayer.id]) || 0;
+            const winPct = Math.min(100, Math.max(0, Math.round((currentScore / target) * 100)));
+            return (
+              <div className="mt-6 pt-4 border-t border-teal-500/30">
+                <div className="flex justify-between text-xs text-teal-100 mb-1.5 font-bold uppercase tracking-wider">
+                  <span>Target: {target} pts</span>
+                  <span>{winPct}% to win</span>
+                </div>
+                <div className="w-full h-2.5 bg-teal-800/80 rounded-full overflow-hidden">
+                  <div
+                    className="h-full transition-all duration-300 bg-yellow-400"
+                    style={{
+                      width: `${winPct}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Scoring Pad */}
@@ -651,12 +723,19 @@ export default function DominoesScorer({
                     </div>
 
                     {/* Miniature progress bar */}
-                    <div className="w-full h-1.5 bg-orange-100/80 rounded-full mt-2.5 overflow-hidden">
-                      <div
-                        className={`h-full ${colorClass}`}
-                        style={{ width: `${Math.min(100, (score / gameState.targetScore) * 100)}%` }}
-                      />
-                    </div>
+                    {(() => {
+                      const target = Math.max(1, Number(gameState.targetScore) || 200);
+                      const pScore = Number(score) || 0;
+                      const miniPct = Math.min(100, Math.max(0, Math.round((pScore / target) * 100)));
+                      return (
+                        <div className="w-full h-1.5 bg-orange-100/80 rounded-full mt-2.5 overflow-hidden">
+                          <div
+                            className={`h-full ${colorClass}`}
+                            style={{ width: `${miniPct}%` }}
+                          />
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })}

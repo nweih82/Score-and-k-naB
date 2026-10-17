@@ -56,7 +56,7 @@ body {
 /* Color Theme Backgrounds & Variables (Light & Dark) */
 
 /* AMBER THEME */
-html.theme-amber body {
+html.theme-amber body, [data-preview-theme="amber"] {
   background-color: #fffbe8;
   --theme-accent-color: #f59e0b;
   --theme-header-border: #f59e0b;
@@ -76,7 +76,7 @@ html.theme-amber body {
   --yz-btn-bg: #f59e0b;
   --yz-btn-hover: #d97706;
 }
-html.theme-amber.dark body {
+html.theme-amber.dark body, [data-preview-theme="amber"].dark, .dark [data-preview-theme="amber"] {
   background-color: #16100a;
   --theme-accent-color: #f59e0b;
   --theme-header-border: #d97706;
@@ -98,7 +98,7 @@ html.theme-amber.dark body {
 }
 
 /* OCEANIC THEME */
-html.theme-oceanic body {
+html.theme-oceanic body, [data-preview-theme="oceanic"] {
   background-color: #f0fdfa;
   --theme-accent-color: #0d9488;
   --theme-header-border: #0d9488;
@@ -118,7 +118,7 @@ html.theme-oceanic body {
   --yz-btn-bg: #0d9488;
   --yz-btn-hover: #0f766e;
 }
-html.theme-oceanic.dark body {
+html.theme-oceanic.dark body, [data-preview-theme="oceanic"].dark, .dark [data-preview-theme="oceanic"] {
   background-color: #032023;
   --theme-accent-color: #0d9488;
   --theme-header-border: #0f766e;
@@ -140,7 +140,7 @@ html.theme-oceanic.dark body {
 }
 
 /* ROYAL THEME */
-html.theme-royal body {
+html.theme-royal body, [data-preview-theme="royal"] {
   background-color: #faf5ff;
   --theme-accent-color: #8b5cf6;
   --theme-header-border: #8b5cf6;
@@ -160,7 +160,7 @@ html.theme-royal body {
   --yz-btn-bg: #8b5cf6;
   --yz-btn-hover: #7c3aed;
 }
-html.theme-royal.dark body {
+html.theme-royal.dark body, [data-preview-theme="royal"].dark, .dark [data-preview-theme="royal"] {
   background-color: #120d24;
   --theme-accent-color: #8b5cf6;
   --theme-header-border: #6d28d9;
@@ -182,7 +182,7 @@ html.theme-royal.dark body {
 }
 
 /* ROSE THEME */
-html.theme-rose body {
+html.theme-rose body, [data-preview-theme="rose"] {
   background-color: #fff1f2;
   --theme-accent-color: #f43f5e;
   --theme-header-border: #f43f5e;
@@ -202,7 +202,7 @@ html.theme-rose body {
   --yz-btn-bg: #f43f5e;
   --yz-btn-hover: #e11d48;
 }
-html.theme-rose.dark body {
+html.theme-rose.dark body, [data-preview-theme="rose"].dark, .dark [data-preview-theme="rose"] {
   background-color: #210612;
   --theme-accent-color: #f43f5e;
   --theme-header-border: #be123c;
@@ -224,7 +224,7 @@ html.theme-rose.dark body {
 }
 
 /* EMERALD THEME */
-html.theme-emerald body {
+html.theme-emerald body, [data-preview-theme="emerald"] {
   background-color: #f0fdf4;
   --theme-accent-color: #10b981;
   --theme-header-border: #10b981;
@@ -244,7 +244,7 @@ html.theme-emerald body {
   --yz-btn-bg: #10b981;
   --yz-btn-hover: #059669;
 }
-html.theme-emerald.dark body {
+html.theme-emerald.dark body, [data-preview-theme="emerald"].dark, .dark [data-preview-theme="emerald"] {
   background-color: #031e17;
   --theme-accent-color: #10b981;
   --theme-header-border: #047857;
@@ -266,7 +266,7 @@ html.theme-emerald.dark body {
 }
 
 /* CYBER THEME */
-html.theme-cyber body {
+html.theme-cyber body, [data-preview-theme="cyber"] {
   background-color: #f0f9ff;
   --theme-accent-color: #06b6d4;
   --theme-header-border: #06b6d4;
@@ -286,7 +286,7 @@ html.theme-cyber body {
   --yz-btn-bg: #06b6d4;
   --yz-btn-hover: #0891b2;
 }
-html.theme-cyber.dark body {
+html.theme-cyber.dark body, [data-preview-theme="cyber"].dark, .dark [data-preview-theme="cyber"] {
   background-color: #050c1a;
   --theme-accent-color: #06b6d4;
   --theme-header-border: #0284c7;

@@ -21,7 +21,69 @@ const COLOR_PRESETS = [
   'bg-indigo-500 text-white',
 ];
 
-const EMOJI_PRESETS = ['🎲', '🎯', '👑', '🔥', '🐉', '🦊', '🦁', '🦉', '⭐', '⚡', '🏆', '💎', '🎨', '🚀', '🍀', '🍕'];
+export interface AvatarItem {
+  emoji: string;
+  label: string;
+  category: 'weed' | 'classic' | 'creatures';
+}
+
+export const AVATAR_OPTIONS: AvatarItem[] = [
+  // Weed / Marijuana / 420 Themed Avatars
+  { emoji: '🍁', label: 'Cannabis Leaf', category: 'weed' },
+  { emoji: '🌿', label: 'Herb / Mary Jane', category: 'weed' },
+  { emoji: '🍃', label: 'Green Bud / Leaf', category: 'weed' },
+  { emoji: '🚬', label: 'Joint / Blunt', category: 'weed' },
+  { emoji: '💨', label: 'Smoke Puff / Vape', category: 'weed' },
+  { emoji: '😮‍💨', label: 'Exhale / Puff Puff Pass', category: 'weed' },
+  { emoji: '🫠', label: 'Melted / Baked', category: 'weed' },
+  { emoji: '🥴', label: 'Woozy / Stoned', category: 'weed' },
+  { emoji: '🌲', label: 'Trees / Green', category: 'weed' },
+  { emoji: '🥦', label: 'Broccoli / Nug', category: 'weed' },
+  { emoji: '🌱', label: 'Cannabis Sprout', category: 'weed' },
+  { emoji: '🪴', label: 'Potted Plant / Grow', category: 'weed' },
+  { emoji: '🍪', label: 'Special Cookie / Edible', category: 'weed' },
+  { emoji: '🍬', label: 'THC Gummy / Edible', category: 'weed' },
+  { emoji: '🧪', label: 'Dab Rig / Extract', category: 'weed' },
+  { emoji: '🍄', label: 'Magic Shroom', category: 'weed' },
+  { emoji: '✌️', label: '420 Peace & Chill', category: 'weed' },
+  { emoji: '🔥', label: 'Spark It / Blaze', category: 'weed' },
+  { emoji: '🕶️', label: 'Red-Eye Shades', category: 'weed' },
+  { emoji: '🍵', label: 'Infused Green Tea', category: 'weed' },
+
+  // Classic Game & Fun Avatars
+  { emoji: '🎲', label: 'Dice', category: 'classic' },
+  { emoji: '🎯', label: 'Bullseye', category: 'classic' },
+  { emoji: '👑', label: 'Crown', category: 'classic' },
+  { emoji: '🏆', label: 'Trophy', category: 'classic' },
+  { emoji: '💎', label: 'Diamond', category: 'classic' },
+  { emoji: '⭐', label: 'Star', category: 'classic' },
+  { emoji: '⚡', label: 'Lightning', category: 'classic' },
+  { emoji: '🚀', label: 'Rocket', category: 'classic' },
+  { emoji: '🍀', label: 'Lucky Clover', category: 'classic' },
+  { emoji: '🍕', label: 'Pizza', category: 'classic' },
+  { emoji: '🎨', label: 'Palette', category: 'classic' },
+  { emoji: '🎸', label: 'Guitar', category: 'classic' },
+  { emoji: '🕹️', label: 'Joystick', category: 'classic' },
+  { emoji: '🥇', label: 'Medal', category: 'classic' },
+
+  // Creatures & Animal Avatars
+  { emoji: '🦊', label: 'Fox', category: 'creatures' },
+  { emoji: '🦁', label: 'Lion', category: 'creatures' },
+  { emoji: '🦉', label: 'Owl', category: 'creatures' },
+  { emoji: '🐉', label: 'Dragon', category: 'creatures' },
+  { emoji: '🦄', label: 'Unicorn', category: 'creatures' },
+  { emoji: '🐼', label: 'Panda', category: 'creatures' },
+  { emoji: '🐯', label: 'Tiger', category: 'creatures' },
+  { emoji: '👽', label: 'Alien', category: 'creatures' },
+  { emoji: '🤖', label: 'Robot', category: 'creatures' },
+  { emoji: '👾', label: 'Monster', category: 'creatures' },
+  { emoji: '👻', label: 'Ghost', category: 'creatures' },
+  { emoji: '🐻', label: 'Bear', category: 'creatures' },
+  { emoji: '🐸', label: 'Frog', category: 'creatures' },
+  { emoji: '🐺', label: 'Wolf', category: 'creatures' },
+];
+
+export const EMOJI_PRESETS = AVATAR_OPTIONS.map((a) => a.emoji);
 
 export default function PlayerManager({
   players,
@@ -31,12 +93,18 @@ export default function PlayerManager({
 }: PlayerManagerProps) {
   const [newPlayerName, setNewPlayerName] = useState('');
   const [selectedColor, setSelectedColor] = useState(COLOR_PRESETS[0]);
-  const [selectedAvatar, setSelectedAvatar] = useState('🎲');
+  const [selectedAvatar, setSelectedAvatar] = useState('🍁');
+  const [avatarCategory, setAvatarCategory] = useState<'weed' | 'classic' | 'creatures' | 'all'>('weed');
+  const [inlineAvatarCategory, setInlineAvatarCategory] = useState<'weed' | 'classic' | 'creatures' | 'all'>('weed');
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [editingColor, setEditingColor] = useState('');
-  const [editingAvatar, setEditingAvatar] = useState('🎲');
+  const [editingAvatar, setEditingAvatar] = useState('🍁');
+
+  const activeAvatarObj = AVATAR_OPTIONS.find(
+    (a) => a.emoji === (editingId ? editingAvatar : selectedAvatar)
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -135,30 +203,92 @@ export default function PlayerManager({
           </div>
 
           <div>
-            <label className="block text-[10px] font-black text-teal-800 dark:text-teal-400 uppercase tracking-widest mb-2">
-              Choose Emoji Avatar
-            </label>
-            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1 bg-orange-50/20 dark:bg-slate-800/40 border border-orange-100/60 dark:border-slate-700/60 rounded-xl">
-              {EMOJI_PRESETS.map((emoji) => {
-                const isSelected = editingId ? editingAvatar === emoji : selectedAvatar === emoji;
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <label className="block text-[10px] font-black text-teal-800 dark:text-teal-400 uppercase tracking-widest">
+                Choose Emoji Avatar
+              </label>
+              {activeAvatarObj && (
+                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-0.5 rounded-full border border-emerald-200/60 dark:border-emerald-800/60 shadow-xs">
+                  <span>{activeAvatarObj.emoji}</span>
+                  <span>{activeAvatarObj.label}</span>
+                </span>
+              )}
+            </div>
+
+            {/* Avatar Category Tabs */}
+            <div className="flex items-center gap-1.5 mb-2 overflow-x-auto pb-1">
+              <button
+                type="button"
+                onClick={() => setAvatarCategory('weed')}
+                className={`px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                  avatarCategory === 'weed'
+                    ? 'bg-emerald-600 text-white shadow-xs scale-102 ring-2 ring-emerald-400/40'
+                    : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200/60 dark:border-emerald-800/40'
+                }`}
+              >
+                <span>🌿</span>
+                <span>Weed / 420</span>
+                <span className="px-1.5 py-0.2 bg-emerald-500/30 text-[10px] rounded-full">
+                  {AVATAR_OPTIONS.filter((a) => a.category === 'weed').length}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAvatarCategory('classic')}
+                className={`px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                  avatarCategory === 'classic'
+                    ? 'bg-orange-500 text-white shadow-xs scale-102 ring-2 ring-orange-400/40'
+                    : 'bg-orange-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-orange-100 border border-orange-100 dark:border-slate-700'
+                }`}
+              >
+                <span>🎲</span>
+                <span>Classic</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAvatarCategory('creatures')}
+                className={`px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                  avatarCategory === 'creatures'
+                    ? 'bg-purple-600 text-white shadow-xs scale-102 ring-2 ring-purple-400/40'
+                    : 'bg-purple-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-purple-100 border border-purple-100 dark:border-slate-700'
+                }`}
+              >
+                <span>🦊</span>
+                <span>Creatures</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAvatarCategory('all')}
+                className={`px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                  avatarCategory === 'all'
+                    ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900 shadow-xs scale-102'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 border border-slate-200 dark:border-slate-700'
+                }`}
+              >
+                <span>✨</span>
+                <span>All ({AVATAR_OPTIONS.length})</span>
+              </button>
+            </div>
+
+            {/* Avatar Grid */}
+            <div className="grid grid-cols-7 sm:grid-cols-10 gap-1.5 max-h-36 overflow-y-auto p-2 bg-orange-50/20 dark:bg-slate-800/40 border border-orange-100/60 dark:border-slate-700/60 rounded-2xl">
+              {AVATAR_OPTIONS.filter(
+                (a) => avatarCategory === 'all' || a.category === avatarCategory
+              ).map((item) => {
+                const isSelected = selectedAvatar === item.emoji;
                 return (
                   <button
-                    key={emoji}
+                    key={item.emoji}
                     type="button"
-                    onClick={() => {
-                      if (editingId) {
-                        setEditingAvatar(emoji);
-                      } else {
-                        setSelectedAvatar(emoji);
-                      }
-                    }}
-                    className={`w-8 h-8 rounded-lg text-base cursor-pointer flex items-center justify-center transition-all ${
+                    title={`${item.label} (${item.emoji})`}
+                    onClick={() => setSelectedAvatar(item.emoji)}
+                    className={`h-9 rounded-xl text-lg cursor-pointer flex items-center justify-center transition-all ${
                       isSelected
-                        ? 'bg-orange-500 text-white shadow-xs scale-110'
-                        : 'bg-white dark:bg-slate-800 hover:bg-orange-100 dark:hover:bg-slate-700'
+                        ? 'bg-emerald-500 text-white shadow-sm scale-110 ring-2 ring-emerald-400'
+                        : 'bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-slate-700 hover:scale-105 border border-slate-100 dark:border-slate-700/40'
                     }`}
                   >
-                    {emoji}
+                    <span>{item.emoji}</span>
                   </button>
                 );
               })}
@@ -209,20 +339,96 @@ export default function PlayerManager({
                       </button>
                     </div>
 
-                    {/* Inline Avatar & Color editing */}
-                    <div className="flex items-center gap-1.5 overflow-x-auto py-1">
-                      {EMOJI_PRESETS.map((emoji) => (
-                        <button
-                          key={emoji}
-                          type="button"
-                          onClick={() => setEditingAvatar(emoji)}
-                          className={`w-6 h-6 rounded text-xs flex items-center justify-center cursor-pointer ${
-                            editingAvatar === emoji ? 'bg-orange-500 text-white' : 'bg-slate-100 dark:bg-slate-800'
-                          }`}
-                        >
-                          {emoji}
-                        </button>
-                      ))}
+                    {/* Inline Avatar Category & Grid editing */}
+                    <div className="space-y-2 p-2.5 bg-white dark:bg-slate-900/90 rounded-2xl border border-orange-100 dark:border-slate-700">
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-teal-800 dark:text-teal-400">
+                          Avatar:
+                        </span>
+                        {activeAvatarObj && (
+                          <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-200/50">
+                            {activeAvatarObj.emoji} {activeAvatarObj.label}
+                          </span>
+                        )}
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setInlineAvatarCategory('weed')}
+                            className={`px-2 py-0.5 text-[10px] font-black rounded-lg transition-colors cursor-pointer ${
+                              inlineAvatarCategory === 'weed'
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+                            }`}
+                          >
+                            🌿 Weed
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setInlineAvatarCategory('classic')}
+                            className={`px-2 py-0.5 text-[10px] font-black rounded-lg transition-colors cursor-pointer ${
+                              inlineAvatarCategory === 'classic'
+                                ? 'bg-orange-500 text-white'
+                                : 'bg-orange-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            🎲 Classic
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setInlineAvatarCategory('all')}
+                            className={`px-2 py-0.5 text-[10px] font-black rounded-lg transition-colors cursor-pointer ${
+                              inlineAvatarCategory === 'all'
+                                ? 'bg-slate-700 text-white'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                            }`}
+                          >
+                            ✨ All
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Avatar Picker Scroll */}
+                      <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+                        {AVATAR_OPTIONS.filter(
+                          (a) =>
+                            inlineAvatarCategory === 'all' ||
+                            a.category === inlineAvatarCategory
+                        ).map((item) => (
+                          <button
+                            key={item.emoji}
+                            type="button"
+                            title={`${item.label} (${item.emoji})`}
+                            onClick={() => setEditingAvatar(item.emoji)}
+                            className={`w-8 h-8 rounded-lg text-sm flex items-center justify-center shrink-0 cursor-pointer transition-all ${
+                              editingAvatar === item.emoji
+                                ? 'bg-emerald-500 text-white shadow-xs scale-110 ring-2 ring-emerald-400'
+                                : 'bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 hover:scale-105'
+                            }`}
+                          >
+                            {item.emoji}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Theme color picker for player */}
+                      <div className="flex items-center gap-1.5 overflow-x-auto pt-1 border-t border-slate-100 dark:border-slate-800">
+                        <span className="text-[10px] font-black uppercase text-slate-400 shrink-0">Color:</span>
+                        {COLOR_PRESETS.map((color) => {
+                          const bgClass = color.split(' ')[0];
+                          return (
+                            <button
+                              key={color}
+                              type="button"
+                              onClick={() => setEditingColor(color)}
+                              className={`w-5 h-5 rounded-full ${bgClass} shrink-0 cursor-pointer flex items-center justify-center transition-all ${
+                                editingColor === color ? 'ring-2 ring-orange-500 scale-110' : 'hover:scale-105'
+                              }`}
+                            >
+                              {editingColor === color && <Check className="w-3 h-3 text-white" />}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 ) : (

@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { Player, FarkleState, FarkleRound } from '../types';
-import { Play, RotateCcw, Award, CheckCircle, Flame, AlertCircle, Plus, ChevronRight, Hash, Trash2, UserPlus, X, Edit2, Edit3, Save, Pencil, Undo } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Player, FarkleState, FarkleRound, ActionLogItem, FarkleHouseRules } from '../types';
+import { Play, RotateCcw, Award, CheckCircle, Flame, AlertCircle, Plus, ChevronRight, Hash, Trash2, UserPlus, X, Edit2, Edit3, Save, Pencil, Undo, Activity, Mic, Hand, Clock, Wifi, RefreshCw, Sliders, ShieldAlert, Sparkles, Dices } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, saveActiveGameToFirestore, deleteSavedGameFromFirestore } from '../lib/firebase';
 import { useSound } from '../lib/SoundContext';
-import VoiceCommandBar, { FarkleVoiceCommand } from './VoiceCommandBar';
+import { VoiceAssistantWidget, VoiceCommandResult } from './VoiceAssistantWidget';
+import { safeClone, safeJsonStringify } from '../lib/utils';
+import { DEFAULT_FARKLE_RULES, loadActiveHouseRules, loadActivePresetId, loadHouseRulesPresets } from '../lib/houseRules';
 
 interface FarkleScorerProps {
   players: Player[];
@@ -14,6 +16,8 @@ interface FarkleScorerProps {
   externalTurnScore?: number | null;
   onSyncGameRoom?: (newGameState: FarkleState, turnScore?: number | null) => void;
   isOnlineSynced?: boolean;
+  houseRules?: FarkleHouseRules;
+  onOpenHouseRules?: () => void;
 }
 
 export default function FarkleScorer({
@@ -24,17 +28,42 @@ export default function FarkleScorer({
   externalTurnScore,
   onSyncGameRoom,
   isOnlineSynced,
+  houseRules,
+  onOpenHouseRules,
 }: FarkleScorerProps) {
   const { playBank, playFarkle, playUndo } = useSound();
-  const [gameState, setGameState] = useState<FarkleState | null>(null);
+  const [gameState, setGameState] = useState<FarkleState | null>(() => {
+    if (externalGameState && Array.isArray(externalGameState.players) && externalGameState.players.length > 0) {
+      return externalGameState;
+    }
+    return null;
+  });
   const [historyStack, setHistoryStack] = useState<FarkleState[]>([]);
-  const [targetScoreInput, setTargetScoreInput] = useState(10000);
+  const [targetScoreInput, setTargetScoreInput] = useState(() => {
+    if (externalGameState?.targetScore) return externalGameState.targetScore;
+    const rules = houseRules || loadActiveHouseRules().farkle;
+    return rules.targetScore || 10000;
+  });
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
-  const [isSettingUp, setIsSettingUp] = useState(true);
+  const [houseRuleAlert, setHouseRuleAlert] = useState<string | null>(null);
+  const [isSettingUp, setIsSettingUp] = useState<boolean>(() => {
+    if (externalGameState && Array.isArray(externalGameState.players) && externalGameState.players.length > 0) {
+      return false;
+    }
+    return true;
+  });
+
+  // Auto-dismiss house rule alerts
+  useEffect(() => {
+    if (houseRuleAlert) {
+      const timer = setTimeout(() => setHouseRuleAlert(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [houseRuleAlert]);
 
   const pushStateToHistory = () => {
     if (gameState) {
-      setHistoryStack(prev => [...prev, JSON.parse(JSON.stringify(gameState))]);
+      setHistoryStack(prev => [...prev, safeClone(gameState)]);
     }
   };
 
@@ -57,7 +86,12 @@ export default function FarkleScorer({
   const [inGameNewPlayerName, setInGameNewPlayerName] = useState('');
 
   // Turn scratchpad
-  const [turnScore, setTurnScore] = useState(0);
+  const [turnScore, setTurnScore] = useState<number>(() => {
+    if (typeof externalTurnScore === 'number') {
+      return externalTurnScore;
+    }
+    return 0;
+  });
   const [customScoreInput, setCustomScoreInput] = useState('');
 
   // Score Editing States
@@ -77,8 +111,11 @@ export default function FarkleScorer({
     }
   }, [players]);
 
-  // Check for saved game on mount
+  // Check for saved game on mount (ONLY for local/offline mode, not when connected to an online room)
   useEffect(() => {
+    if (isOnlineSynced || (externalGameState && Array.isArray(externalGameState.players) && externalGameState.players.length > 0)) {
+      return;
+    }
     const saved = localStorage.getItem('scorekeeper_saved_farkle');
     if (saved) {
       try {
@@ -92,45 +129,94 @@ export default function FarkleScorer({
         console.error("Error loading saved Farkle game", err);
       }
     }
-  }, []);
+  }, [isOnlineSynced]);
+
+  const isIncomingSyncRef = useRef<boolean>(false);
+  const lastReceivedExternalJsonRef = useRef<string>(
+    externalGameState && Array.isArray(externalGameState.players) && externalGameState.players.length > 0
+      ? safeJsonStringify({ gameState: externalGameState, turnScore: externalTurnScore ?? 0 })
+      : ''
+  );
 
   // Listen to external online game room updates
   useEffect(() => {
-    if (externalGameState) {
-      setGameState(externalGameState);
-      setIsSettingUp(false);
-      if (externalTurnScore !== undefined && externalTurnScore !== null) {
-        setTurnScore(externalTurnScore);
-      }
+    if (!externalGameState || !Array.isArray(externalGameState.players) || externalGameState.players.length === 0) {
+      return;
+    }
+
+    const incomingJson = safeJsonStringify({
+      gameState: externalGameState,
+      turnScore: externalTurnScore ?? 0,
+    });
+
+    // If identical to what we already recorded as the external state, ignore
+    if (incomingJson === lastReceivedExternalJsonRef.current) {
+      return;
+    }
+
+    // Also compare against current state to avoid setting identical state
+    const currentJson = safeJsonStringify({
+      gameState,
+      turnScore: turnScore ?? 0,
+    });
+    if (incomingJson === currentJson) {
+      lastReceivedExternalJsonRef.current = incomingJson;
+      return;
+    }
+
+    // Mark as incoming sync so the local change effect will NOT echo back to Firestore
+    isIncomingSyncRef.current = true;
+    lastReceivedExternalJsonRef.current = incomingJson;
+
+    setGameState(externalGameState);
+    setIsSettingUp(false);
+    if (externalTurnScore !== undefined && externalTurnScore !== null) {
+      setTurnScore(externalTurnScore);
     }
   }, [externalGameState, externalTurnScore]);
 
   // Save game progress automatically whenever gameState or turnScore changes
   useEffect(() => {
-    if (gameState) {
-      if (gameState.winnerId) {
-        localStorage.removeItem('scorekeeper_saved_farkle');
-        if (auth.currentUser) {
-          deleteSavedGameFromFirestore(auth.currentUser.uid, 'farkle');
-        }
-      } else {
-        const savedData = {
-          gameType: 'farkle' as const,
-          gameState,
-          turnScore,
-          updatedAt: new Date().toISOString(),
-        };
-        localStorage.setItem('scorekeeper_saved_farkle', JSON.stringify(savedData));
-        if (auth.currentUser) {
-          saveActiveGameToFirestore(auth.currentUser.uid, 'farkle', savedData);
+    if (gameState && Array.isArray(gameState.players) && gameState.players.length > 0) {
+      // If this state update was received from the external room, do not echo back or overwrite local solo save
+      if (isIncomingSyncRef.current) {
+        isIncomingSyncRef.current = false;
+        return;
+      }
+
+      if (!isOnlineSynced) {
+        if (gameState.winnerId) {
+          localStorage.removeItem('scorekeeper_saved_farkle');
+          if (auth.currentUser) {
+            deleteSavedGameFromFirestore(auth.currentUser.uid, 'farkle');
+          }
+        } else {
+          const savedData = {
+            gameType: 'farkle' as const,
+            gameState,
+            turnScore,
+            updatedAt: new Date().toISOString(),
+          };
+          localStorage.setItem('scorekeeper_saved_farkle', safeJsonStringify(savedData));
+          if (auth.currentUser) {
+            saveActiveGameToFirestore(auth.currentUser.uid, 'farkle', savedData);
+          }
         }
       }
 
-      if (onSyncGameRoom) {
-        onSyncGameRoom(gameState, turnScore);
+      // Check if this update came from external sync before echoing to Firestore
+      if (isOnlineSynced && onSyncGameRoom) {
+        const currentJson = safeJsonStringify({
+          gameState,
+          turnScore: turnScore ?? 0,
+        });
+        if (currentJson !== lastReceivedExternalJsonRef.current) {
+          lastReceivedExternalJsonRef.current = currentJson;
+          onSyncGameRoom(gameState, turnScore);
+        }
       }
     }
-  }, [gameState, turnScore]);
+  }, [gameState, turnScore, isOnlineSynced]);
 
   const togglePlayerSelection = (playerId: string) => {
     setSelectedPlayers(prev =>
@@ -149,6 +235,7 @@ export default function FarkleScorer({
       initialScores[p.id] = 0;
     });
 
+    const activeRules = houseRules || loadActiveHouseRules().farkle;
     setHistoryStack([]);
     setGameState({
       players: gamePlayers,
@@ -159,6 +246,8 @@ export default function FarkleScorer({
       winnerId: null,
       activePlayerId: gamePlayers[0].id,
       turnHistory: [],
+      rules: activeRules,
+      consecutiveFarkles: {},
     });
 
     setTurnScore(0);
@@ -166,17 +255,122 @@ export default function FarkleScorer({
     setIsSettingUp(false);
   };
 
-  const bankPoints = (amountToBank: number, targetPlayerId?: string) => {
+  const [isListening, setIsListening] = useState(false);
+  const [voiceFeedback, setVoiceFeedback] = useState<string | null>(null);
+
+  const toggleVoiceListening = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setVoiceFeedback('Voice recognition not supported in browser');
+      setTimeout(() => setVoiceFeedback(null), 3000);
+      return;
+    }
+
+    if (isListening) {
+      setIsListening(false);
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setVoiceFeedback('Listening... Say e.g. "Bank 500" or "Farkle"');
+      };
+
+      recognition.onresult = (event: any) => {
+        setIsListening(false);
+        const transcript = event.results[0][0].transcript.toLowerCase().trim();
+        setVoiceFeedback(`Heard: "${transcript}"`);
+        setTimeout(() => setVoiceFeedback(null), 3500);
+
+        if (transcript.includes('farkle') || transcript.includes('zero') || transcript.includes('bust')) {
+          handleFarkle('voice');
+        } else if (transcript.includes('bank')) {
+          const match = transcript.match(/\d+/);
+          if (match) {
+            const amount = parseInt(match[0], 10);
+            if (amount > 0) bankPoints(amount, 'voice');
+          } else if (turnScore > 0) {
+            bankPoints(turnScore, 'voice');
+          }
+        } else if (transcript.includes('add') || transcript.includes('plus')) {
+          const match = transcript.match(/\d+/);
+          if (match) {
+            const amount = parseInt(match[0], 10);
+            if (amount > 0) {
+              addCustomPoints(amount);
+              setVoiceFeedback(`Added ${amount} pts to turn`);
+            }
+          }
+        }
+      };
+
+      recognition.onerror = () => {
+        setIsListening(false);
+        setVoiceFeedback('Speech not recognized. Try again!');
+        setTimeout(() => setVoiceFeedback(null), 3000);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognition.start();
+    } catch {
+      setIsListening(false);
+      setVoiceFeedback('Unable to start mic');
+      setTimeout(() => setVoiceFeedback(null), 3000);
+    }
+  };
+
+  const bankPoints = (amountToBank: number, sourceInput?: any) => {
     if (!gameState) return;
     if (amountToBank <= 0) return;
+
+    const activeRules = gameState.rules || houseRules || loadActiveHouseRules().farkle;
+    const { activePlayerId, scores, rounds, players: gamePlayers, targetScore, finalRoundState } = gameState;
+    const currentScore = scores[activePlayerId] || 0;
+
+    // Validate opening minimum house rule
+    if (currentScore === 0 && activeRules.openingMinimum > 0 && amountToBank < activeRules.openingMinimum) {
+      playFarkle();
+      setHouseRuleAlert(
+        `House Rule: Opening minimum is ${activeRules.openingMinimum.toLocaleString()} pts! Turn score was ${amountToBank.toLocaleString()} pts. Must score at least ${activeRules.openingMinimum.toLocaleString()} pts on a single turn to get on the board.`
+      );
+      return;
+    }
+
+    const source: 'manual' | 'voice' = sourceInput === 'voice' ? 'voice' : 'manual';
 
     pushStateToHistory();
     playBank();
 
-    const { activePlayerId: currentActiveId, scores, rounds, players: gamePlayers, targetScore, finalRoundState } = gameState;
-    const activePlayerId = targetPlayerId || currentActiveId;
-    const currentScore = scores[activePlayerId] || 0;
+    const activePlayer = gamePlayers.find(p => p.id === activePlayerId);
     const newScore = currentScore + amountToBank;
+
+    // Reset consecutive farkles for this player on a banked turn
+    const updatedConsecutiveFarkles = {
+      ...(gameState.consecutiveFarkles || {}),
+      [activePlayerId]: 0,
+    };
+
+    const actionItem: ActionLogItem = {
+      id: Date.now().toString() + Math.random().toString().substring(2, 5),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      playerId: activePlayerId,
+      playerName: activePlayer?.name || 'Player',
+      playerColor: activePlayer?.color,
+      actionType: 'bank',
+      description: `Banked +${amountToBank.toLocaleString()} pts`,
+      points: amountToBank,
+      source,
+    };
+    const updatedRecentActions = [actionItem, ...(gameState.recentActions || [])].slice(0, 20);
 
     // Save score
     const updatedScores = {
@@ -193,12 +387,6 @@ export default function FarkleScorer({
     if (!currentRoundObj) {
       currentRoundObj = { scores: {}, farkles: {} };
       updatedRounds.push(currentRoundObj);
-    } else {
-      currentRoundObj = {
-        scores: { ...currentRoundObj.scores },
-        farkles: { ...currentRoundObj.farkles },
-      };
-      updatedRounds[gameState.currentRound - 1] = currentRoundObj;
     }
     
     currentRoundObj.scores[activePlayerId] = amountToBank;
@@ -215,7 +403,6 @@ export default function FarkleScorer({
           newWinnerId = activePlayerId;
         } else {
           // Trigger Final Round ("Beat the Score")!
-          // Every other player gets 1 final turn in order to beat this score
           const pending: string[] = [];
           for (let i = 1; i < gamePlayers.length; i++) {
             pending.push(gamePlayers[(activeIndex + i) % gamePlayers.length].id);
@@ -230,8 +417,6 @@ export default function FarkleScorer({
     } else {
       // Final round IS already active
       if (newScore > newFinalRoundState.highScoreToBeat) {
-        // Active player BEAT the high score! They take the lead!
-        // All other players get another chance to beat this new high score!
         const newPending: string[] = [];
         for (let i = 1; i < gamePlayers.length; i++) {
           newPending.push(gamePlayers[(activeIndex + i) % gamePlayers.length].id);
@@ -242,10 +427,8 @@ export default function FarkleScorer({
           playersPendingTurn: newPending,
         };
       } else {
-        // Did not beat the score. Remove active player from pending list
         const remainingPending = newFinalRoundState.playersPendingTurn.filter(id => id !== activePlayerId);
         if (remainingPending.length === 0) {
-          // All other players had their final turn and nobody beat the high score!
           newWinnerId = newFinalRoundState.leaderId;
           newFinalRoundState = null;
         } else {
@@ -278,6 +461,8 @@ export default function FarkleScorer({
         activePlayerId: nextPlayerId,
         winnerId: newWinnerId,
         finalRoundState: newFinalRoundState,
+        recentActions: updatedRecentActions,
+        consecutiveFarkles: updatedConsecutiveFarkles,
       };
     });
 
@@ -297,13 +482,56 @@ export default function FarkleScorer({
     bankPoints(turnScore);
   };
 
-  const handleFarkle = (targetPlayerId?: string) => {
+  const handleFarkle = (sourceInput?: any) => {
     if (!gameState) return;
+    const source: 'manual' | 'voice' = sourceInput === 'voice' ? 'voice' : 'manual';
+
     pushStateToHistory();
     playFarkle();
-    const { activePlayerId: currentActiveId, rounds, players: gamePlayers, finalRoundState } = gameState;
-    const activePlayerId = targetPlayerId || currentActiveId;
+    const { activePlayerId, rounds, players: gamePlayers, finalRoundState } = gameState;
+    const activePlayer = gamePlayers.find(p => p.id === activePlayerId);
     const activeIndex = gamePlayers.findIndex(p => p.id === activePlayerId);
+
+    const activeRules = gameState.rules || houseRules || loadActiveHouseRules().farkle;
+    const currentConsecutive = (gameState.consecutiveFarkles?.[activePlayerId] || 0) + 1;
+    let penaltyDeduction = 0;
+    let updatedConsecutiveFarkles = {
+      ...(gameState.consecutiveFarkles || {}),
+      [activePlayerId]: currentConsecutive,
+    };
+    let newScore = gameState.scores[activePlayerId] || 0;
+
+    if (currentConsecutive >= 3 && activeRules.threeFarklesPenalty > 0) {
+      penaltyDeduction = activeRules.threeFarklesPenalty;
+      newScore = Math.max(0, newScore - penaltyDeduction);
+      updatedConsecutiveFarkles[activePlayerId] = 0; // reset streak after penalty
+      setHouseRuleAlert(
+        `⚠️ 3 Consecutive Farkles! Penalty of -${penaltyDeduction.toLocaleString()} pts applied to ${activePlayer?.name || 'Player'}.`
+      );
+    } else if (currentConsecutive === 2 && activeRules.threeFarklesPenalty > 0) {
+      setHouseRuleAlert(
+        `⚠️ Warning: ${activePlayer?.name || 'Player'} has 2 consecutive Farkles! 1 more will trigger a -${activeRules.threeFarklesPenalty.toLocaleString()} pt penalty.`
+      );
+    }
+
+    const actionItem: ActionLogItem = {
+      id: Date.now().toString() + Math.random().toString().substring(2, 5),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      playerId: activePlayerId,
+      playerName: activePlayer?.name || 'Player',
+      playerColor: activePlayer?.color,
+      actionType: 'farkle',
+      description: penaltyDeduction > 0
+        ? `Farkled 3 in a row! Penalty: -${penaltyDeduction.toLocaleString()} pts`
+        : `Farkled (0 pts)`,
+      points: penaltyDeduction > 0 ? -penaltyDeduction : 0,
+      source,
+    };
+    const updatedRecentActions = [actionItem, ...(gameState.recentActions || [])].slice(0, 20);
+
+    const updatedScores = penaltyDeduction > 0
+      ? { ...gameState.scores, [activePlayerId]: newScore }
+      : gameState.scores;
 
     // Record 0 points and Farkle
     let updatedRounds = [...rounds];
@@ -321,7 +549,6 @@ export default function FarkleScorer({
     if (newFinalRoundState) {
       const remainingPending = newFinalRoundState.playersPendingTurn.filter(id => id !== activePlayerId);
       if (remainingPending.length === 0) {
-        // Everyone had their turn and nobody beat the high score!
         newWinnerId = newFinalRoundState.leaderId;
         newFinalRoundState = null;
       } else {
@@ -346,11 +573,14 @@ export default function FarkleScorer({
       if (!prev) return null;
       return {
         ...prev,
+        scores: updatedScores,
         rounds: updatedRounds,
         currentRound: nextRound,
         activePlayerId: nextPlayerId,
         winnerId: newWinnerId,
         finalRoundState: newFinalRoundState,
+        recentActions: updatedRecentActions,
+        consecutiveFarkles: updatedConsecutiveFarkles,
       };
     });
 
@@ -358,7 +588,7 @@ export default function FarkleScorer({
       const winner = gamePlayers.find(p => p.id === newWinnerId);
       if (winner) {
         localStorage.removeItem('scorekeeper_saved_farkle');
-        onGameFinished(winner.name, gameState.scores);
+        onGameFinished(winner.name, updatedScores);
       }
     }
 
@@ -388,6 +618,18 @@ export default function FarkleScorer({
     pushStateToHistory();
     const newScore = Math.max(0, parseInt(manualScoreValue) || 0);
 
+    const actionItem: ActionLogItem = {
+      id: Date.now().toString() + Math.random().toString().substring(2, 5),
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      playerId: editingScorePlayer.id,
+      playerName: editingScorePlayer.name,
+      actionType: 'edit_score',
+      description: `Total score edited to ${newScore.toLocaleString()} pts`,
+      points: newScore,
+      source: 'manual',
+    };
+    const updatedRecentActions = [actionItem, ...(gameState.recentActions || [])].slice(0, 20);
+
     const updatedScores = {
       ...gameState.scores,
       [editingScorePlayer.id]: newScore,
@@ -404,6 +646,7 @@ export default function FarkleScorer({
       ...prev,
       scores: updatedScores,
       winnerId: newWinnerId,
+      recentActions: updatedRecentActions,
     } : null);
 
     setEditingScorePlayer(null);
@@ -446,6 +689,18 @@ export default function FarkleScorer({
       const currentTotal = gameState.scores[playerId] || 0;
       const updatedTotal = Math.max(0, currentTotal + diff);
 
+      const actionItem: ActionLogItem = {
+        id: Date.now().toString() + Math.random().toString().substring(2, 5),
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        playerId: playerId,
+        playerName: editingRoundData.playerName,
+        actionType: 'edit_score',
+        description: `Round ${roundIdx + 1} score edited to ${newScore.toLocaleString()} pts`,
+        points: newScore,
+        source: 'manual',
+      };
+      const updatedRecentActions = [actionItem, ...(gameState.recentActions || [])].slice(0, 20);
+
       setGameState(prev => prev ? {
         ...prev,
         rounds: updatedRounds,
@@ -453,10 +708,13 @@ export default function FarkleScorer({
           ...prev.scores,
           [playerId]: updatedTotal,
         },
+        recentActions: updatedRecentActions,
       } : null);
     }
     setEditingRoundData(null);
   };
+
+
 
   // Reset Game Helper
   const resetGame = () => {
@@ -667,6 +925,52 @@ export default function FarkleScorer({
             </div>
           </div>
 
+          {/* Step 3: House Rules Configuration */}
+          <div className="p-4 bg-orange-50/50 rounded-2xl border-2 border-orange-100/90 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-orange-600" />
+                <span className="text-[10px] font-black text-teal-900 uppercase tracking-widest">
+                  Active House Rules
+                </span>
+              </div>
+              {onOpenHouseRules && (
+                <button
+                  type="button"
+                  onClick={onOpenHouseRules}
+                  className="px-2.5 py-1 bg-white hover:bg-orange-100/60 text-orange-700 border border-orange-200 text-[10px] font-black uppercase rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                >
+                  <Sliders className="w-3 h-3" /> Customize Rules
+                </button>
+              )}
+            </div>
+            {(() => {
+              const rules = houseRules || loadActiveHouseRules().farkle;
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] pt-1">
+                  <div className="bg-white/80 p-2 rounded-xl border border-orange-100/70">
+                    <span className="text-slate-400 block text-[9px] uppercase font-bold">Opening Min:</span>
+                    <span className="font-extrabold text-slate-800">
+                      {rules.openingMinimum > 0 ? `${rules.openingMinimum.toLocaleString()} pts` : 'None'}
+                    </span>
+                  </div>
+                  <div className="bg-white/80 p-2 rounded-xl border border-orange-100/70">
+                    <span className="text-slate-400 block text-[9px] uppercase font-bold">3 Farkles Penalty:</span>
+                    <span className="font-extrabold text-slate-800">
+                      {rules.threeFarklesPenalty > 0 ? `-${rules.threeFarklesPenalty.toLocaleString()} pts` : 'None'}
+                    </span>
+                  </div>
+                  <div className="bg-white/80 p-2 rounded-xl border border-orange-100/70">
+                    <span className="text-slate-400 block text-[9px] uppercase font-bold">3 Pairs Combo:</span>
+                    <span className="font-extrabold text-slate-800">
+                      {rules.threePairsScore > 0 ? `${rules.threePairsScore.toLocaleString()} pts` : 'Disabled'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
           {/* Start Button */}
           <button
             onClick={startNewGame}
@@ -681,66 +985,59 @@ export default function FarkleScorer({
     );
   }
 
-  if (!gameState) return null;
+  const handleVoiceCommandInFarkle = (result: VoiceCommandResult) => {
+    if (!gameState || gameState.winnerId) return;
 
-  const activePlayer = gameState.players.find(p => p.id === gameState.activePlayerId)!;
+    if (result.actionType === 'bank') {
+      if (typeof result.points === 'number' && result.points > 0) {
+        bankPoints(result.points, 'voice');
+        setTurnScore(0);
+      } else if (turnScore > 0) {
+        bankPoints(turnScore, 'voice');
+        setTurnScore(0);
+      }
+    } else if (result.actionType === 'farkle') {
+      handleFarkle();
+    } else if (result.actionType === 'add_turn_points' && typeof result.points === 'number') {
+      setTurnScore(prev => prev + result.points);
+    } else if (result.actionType === 'undo') {
+      handleUndo();
+    }
+  };
+
+  if (!gameState || !gameState.players || gameState.players.length === 0) {
+    if (isOnlineSynced) {
+      return (
+        <div className="flex flex-col items-center justify-center p-12 bg-slate-900/80 border-2 border-emerald-500/30 rounded-3xl text-center space-y-4 max-w-md mx-auto my-12 shadow-2xl">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+            <Wifi className="w-7 h-7 animate-pulse" />
+          </div>
+          <h3 className="text-xl font-black text-white">Synchronizing Farkle Match...</h3>
+          <p className="text-sm text-slate-400">Connecting devices and syncing players and scores in real-time.</p>
+        </div>
+      );
+    }
+    return null;
+  }
+
+  const activePlayer = (gameState.players && gameState.players.find(p => p.id === gameState.activePlayerId)) ||
+    gameState.players[0] || { id: 'p1', name: 'Player 1', color: 'bg-emerald-500 text-white', avatar: '🍁' };
   const winner = gameState.winnerId ? gameState.players.find(p => p.id === gameState.winnerId) : null;
 
-  const handleVoiceCommand = (cmd: FarkleVoiceCommand): boolean => {
-    if (!gameState) return false;
-
-    let targetPlayerId = gameState.activePlayerId;
-    if (cmd.playerName) {
-      const cleanCmdName = cmd.playerName.toLowerCase().replace(/'s$/, '').replace(/[^a-z0-9]/g, '').trim();
-      const found = gameState.players.find(p => {
-        const pName = p.name.toLowerCase().replace(/'s$/, '').replace(/[^a-z0-9]/g, '').trim();
-        return pName === cleanCmdName || pName.startsWith(cleanCmdName) || cleanCmdName.startsWith(pName);
-      });
-      if (found) {
-        targetPlayerId = found.id;
-      }
-    }
-
-    if (cmd.type === 'ADD_POINTS') {
-      if (targetPlayerId !== gameState.activePlayerId) {
-        setGameState(prev => prev ? { ...prev, activePlayerId: targetPlayerId } : null);
-      }
-      setTurnScore(prev => prev + cmd.amount);
-      return true;
-    } else if (cmd.type === 'BANK') {
-      const amountToBank = cmd.amount !== undefined && cmd.amount > 0 ? cmd.amount : turnScore;
-      if (amountToBank > 0) {
-        bankPoints(amountToBank, targetPlayerId);
-        return true;
-      } else {
-        return false;
-      }
-    } else if (cmd.type === 'FARKLE') {
-      handleFarkle(targetPlayerId);
-      return true;
-    } else if (cmd.type === 'CLEAR_TURN') {
-      setTurnScore(0);
-      return true;
-    } else if (cmd.type === 'UNDO') {
-      handleUndo();
-      return true;
-    } else if (cmd.type === 'SELECT_PLAYER') {
-      if (targetPlayerId) {
-        setGameState(prev => prev ? { ...prev, activePlayerId: targetPlayerId } : null);
-        return true;
-      }
-    }
-    return false;
-  };
+  const farkleGameSummaryText = (() => {
+    const sorted = [...(gameState.players || [])].sort((a, b) => (gameState.scores?.[b.id] || 0) - (gameState.scores?.[a.id] || 0));
+    const leader = sorted[0];
+    return `${leader?.name || 'Leader'} is in first place with ${(gameState.scores?.[leader?.id] || 0).toLocaleString()} points. It is currently ${activePlayer?.name || 'Player'}'s turn!`;
+  })();
 
   return (
     <div className="space-y-6">
-      {/* Voice Command Bar */}
-      <VoiceCommandBar
+      {/* Integrated Voice Assistant */}
+      <VoiceAssistantWidget
         gameType="farkle"
         activePlayerName={activePlayer.name}
-        playerNames={gameState.players.map(p => p.name)}
-        onFarkleCommand={handleVoiceCommand}
+        gameSummaryText={farkleGameSummaryText}
+        onExecuteCommand={handleVoiceCommandInFarkle}
       />
 
       {/* Final Round "Beat the Score" Banner */}
@@ -760,21 +1057,23 @@ export default function FarkleScorer({
                   Final Round - Beat The Score!
                 </span>
                 <span className="text-xs text-amber-100 font-bold">
-                  Target: {gameState.targetScore.toLocaleString()} pts
+                  Target: {(Number(gameState.targetScore) || 10000).toLocaleString()} pts
                 </span>
               </div>
 
               {(() => {
                 const leader = gameState.players.find(p => p.id === gameState.finalRoundState!.leaderId);
                 const isCurrentLeader = gameState.activePlayerId === gameState.finalRoundState!.leaderId;
-                const activePlayerCurrentScore = (gameState.scores[gameState.activePlayerId] || 0) + turnScore;
-                const pointsNeeded = Math.max(1, gameState.finalRoundState!.highScoreToBeat - activePlayerCurrentScore + 1);
+                const safeTurn = Number(turnScore) || 0;
+                const activePlayerCurrentScore = (Number(gameState.scores[gameState.activePlayerId]) || 0) + safeTurn;
+                const highScoreToBeat = Number(gameState.finalRoundState!.highScoreToBeat) || 0;
+                const pointsNeeded = Math.max(1, highScoreToBeat - activePlayerCurrentScore + 1);
 
                 return (
                   <div>
                     <h3 className="text-lg sm:text-xl font-black uppercase tracking-tight flex flex-wrap items-center gap-2">
                       <span>👑 Score to Beat:</span>
-                      <span className="text-yellow-300 font-black">{leader?.name} ({gameState.finalRoundState!.highScoreToBeat.toLocaleString()} pts)</span>
+                      <span className="text-yellow-300 font-black">{leader?.name} ({highScoreToBeat.toLocaleString()} pts)</span>
                     </h3>
                     <p className="text-xs font-bold text-amber-100 mt-1">
                       {isCurrentLeader ? (
@@ -830,6 +1129,29 @@ export default function FarkleScorer({
         </motion.div>
       )}
 
+      {/* House Rule Alerts */}
+      <AnimatePresence>
+        {houseRuleAlert && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="p-4 bg-amber-500 text-amber-950 border-2 border-amber-600/30 rounded-2xl text-xs font-black shadow-md flex items-center justify-between gap-3"
+          >
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 shrink-0 text-amber-950" />
+              <span>{houseRuleAlert}</span>
+            </div>
+            <button
+              onClick={() => setHouseRuleAlert(null)}
+              className="p-1 hover:bg-amber-600/20 rounded-lg cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Turn Banner */}
       <div className="bg-teal-600 text-white rounded-[32px] p-6 shadow-lg border-2 border-teal-500/20 relative overflow-hidden">
         {/* Decorative background element */}
@@ -837,7 +1159,7 @@ export default function FarkleScorer({
 
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 relative z-10">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center flex-wrap gap-2">
               <span className="text-[10px] font-black text-orange-300 uppercase tracking-widest flex items-center gap-1 bg-teal-700/50 w-fit px-2.5 py-1 rounded-full border border-teal-500/30">
                 <Flame className="w-3.5 h-3.5 fill-current" />
                 Active Turn - Round {gameState.currentRound}
@@ -851,6 +1173,16 @@ export default function FarkleScorer({
                 <Undo className="w-3 h-3" />
                 Undo {historyStack.length > 0 && `(${historyStack.length})`}
               </button>
+              {onOpenHouseRules && (
+                <button
+                  onClick={onOpenHouseRules}
+                  className="px-2.5 py-1 bg-teal-700/70 hover:bg-teal-700 text-teal-100 font-bold rounded-full text-[10px] flex items-center gap-1 transition-all cursor-pointer border border-teal-500/30"
+                  title="View or modify active House Rules"
+                >
+                  <Sliders className="w-3 h-3 text-amber-300" />
+                  House Rules
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-3 mt-1.5">
               <div className={`w-4 h-4 rounded-full ${activePlayer.color.split(' ')[0]} ring-2 ring-white`} />
@@ -858,6 +1190,19 @@ export default function FarkleScorer({
                 {activePlayer.name}'s Roll
               </h2>
             </div>
+            {(() => {
+              const activeRules = gameState.rules || houseRules || loadActiveHouseRules().farkle;
+              const streak = gameState.consecutiveFarkles?.[gameState.activePlayerId] || 0;
+              if (streak >= 2 && activeRules.threeFarklesPenalty > 0) {
+                return (
+                  <div className="mt-2 px-3 py-1 bg-red-500/30 border border-red-300/40 rounded-xl text-[11px] font-black text-red-100 flex items-center gap-1.5 w-fit">
+                    <ShieldAlert className="w-3.5 h-3.5 text-red-300" />
+                    <span>Warning: 2 consecutive Farkles! Next Farkle costs -{activeRules.threeFarklesPenalty.toLocaleString()} pts.</span>
+                  </div>
+                );
+              }
+              return null;
+            })()}
           </div>
 
           <div className="flex items-center gap-3 bg-white/10 border border-white/20 px-5 py-3 rounded-2xl backdrop-blur-md">
@@ -899,7 +1244,7 @@ export default function FarkleScorer({
                 </div>
               ) : (
                 <div className="font-mono text-3xl font-black text-yellow-300">
-                  {turnScore.toLocaleString()}
+                  {(Number(turnScore) || 0).toLocaleString()}
                 </div>
               )}
             </div>
@@ -907,27 +1252,28 @@ export default function FarkleScorer({
         </div>
 
         {/* Target Progress Bar */}
-        <div className="mt-6 pt-4 border-t border-teal-500/30">
-          <div className="flex justify-between text-xs text-teal-100 mb-1.5 font-bold uppercase tracking-wider">
-            <span>Target: {gameState.targetScore.toLocaleString()} pts</span>
-            <span>
-              Current Score: {((gameState.scores[gameState.activePlayerId] || 0) + turnScore).toLocaleString()}
-            </span>
-          </div>
-          <div className="w-full h-2.5 bg-teal-800/80 rounded-full overflow-hidden">
-            <div
-              className="h-full transition-all duration-300 bg-yellow-400"
-              style={{
-                width: `${Math.min(
-                  100,
-                  (((gameState.scores[gameState.activePlayerId] || 0) + turnScore) /
-                    gameState.targetScore) *
-                    100
-                )}%`,
-              }}
-            />
-          </div>
-        </div>
+        {(() => {
+          const target = Math.max(100, Number(gameState.targetScore) || 10000);
+          const safeTurn = Number(turnScore) || 0;
+          const currentTotal = (Number(gameState.scores[gameState.activePlayerId]) || 0) + safeTurn;
+          const pct = Math.min(100, Math.max(0, Math.round((currentTotal / target) * 100)));
+          return (
+            <div className="mt-6 pt-4 border-t border-teal-500/30">
+              <div className="flex justify-between text-xs text-teal-100 mb-1.5 font-bold uppercase tracking-wider">
+                <span>Target: {target.toLocaleString()} pts</span>
+                <span>Current Score: {currentTotal.toLocaleString()}</span>
+              </div>
+              <div className="w-full h-2.5 bg-teal-800/80 rounded-full overflow-hidden">
+                <div
+                  className="h-full transition-all duration-300 bg-yellow-400"
+                  style={{
+                    width: `${pct}%`,
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Main Scorer Interface */}
@@ -953,7 +1299,7 @@ export default function FarkleScorer({
                 </button>
 
                 <button
-                  onClick={handleFarkle}
+                  onClick={() => handleFarkle('manual')}
                   className="py-3.5 px-4 bg-red-500 hover:bg-red-600 text-white font-black rounded-full text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md uppercase tracking-wider"
                 >
                   <AlertCircle className="w-4 h-4" />
@@ -993,6 +1339,41 @@ export default function FarkleScorer({
                 ))}
               </div>
 
+              {/* House Rule Combinations */}
+              {(() => {
+                const rules = gameState.rules || houseRules || loadActiveHouseRules().farkle;
+                const combos = [
+                  { label: '3 Pairs', pts: rules.threePairsScore },
+                  { label: 'Full House', pts: rules.fullHouseScore },
+                  { label: 'Straight (1-6)', pts: rules.straightScore },
+                ].filter(c => c.pts > 0);
+
+                if (combos.length === 0) return null;
+                return (
+                  <div className="mt-3 pt-3 border-t border-orange-100/70">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] font-black text-amber-900 uppercase tracking-widest flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-amber-500" /> House Rule Combinations
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {combos.map(c => (
+                        <button
+                          key={c.label}
+                          type="button"
+                          onClick={() => addCustomPoints(c.pts)}
+                          className="px-3 py-1.5 bg-amber-50 hover:bg-amber-500 hover:text-white text-amber-950 border border-amber-200 font-bold rounded-xl text-xs transition-all cursor-pointer shadow-2xs flex items-center gap-1.5"
+                          title={`Add ${c.label} (${c.pts} pts) to current turn`}
+                        >
+                          <span>{c.label}</span>
+                          <span className="font-mono font-black text-[11px]">+{c.pts}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Custom points input */}
               <form onSubmit={handleCustomScoreSubmit} className="flex gap-2 mt-3">
                 <div className="relative flex-1">
@@ -1017,6 +1398,93 @@ export default function FarkleScorer({
               </form>
             </div>
           </div>
+
+          {/* Recent Actions Log */}
+          <div className="bg-white rounded-[32px] shadow-sm border-2 border-orange-100 p-5 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-orange-600" />
+                <h3 className="text-[11px] font-black text-teal-800 uppercase tracking-widest">
+                  Recent Actions
+                </h3>
+                <span className="px-2 py-0.5 bg-orange-100/70 text-orange-800 text-[9px] font-black rounded-full uppercase tracking-wider">
+                  Last 3 Updates
+                </span>
+              </div>
+              <button
+                onClick={toggleVoiceListening}
+                className={`px-3 py-1.5 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 shadow-xs ${
+                  isListening
+                    ? 'bg-purple-600 text-white animate-pulse ring-2 ring-purple-300'
+                    : 'bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200'
+                }`}
+                title="Voice Score Input"
+              >
+                <Mic className="w-3.5 h-3.5" />
+                {isListening ? 'Listening...' : 'Voice Update'}
+              </button>
+            </div>
+
+            {voiceFeedback && (
+              <div className="p-2.5 bg-purple-50 text-purple-900 border border-purple-200 rounded-xl text-xs font-bold text-center">
+                {voiceFeedback}
+              </div>
+            )}
+
+            {(!gameState.recentActions || gameState.recentActions.length === 0) ? (
+              <div className="text-center py-4 text-slate-400 text-xs font-semibold italic bg-orange-50/20 rounded-2xl border border-dashed border-orange-100">
+                No score updates logged yet this game.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {gameState.recentActions.slice(0, 3).map((item) => {
+                  const player = gameState.players.find(p => p.id === item.playerId);
+                  const colorClass = (player?.color || item.playerColor || 'bg-orange-500').split(' ')[0];
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between p-3 bg-slate-50/80 hover:bg-slate-50 rounded-2xl border border-slate-100 transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className={`w-6 h-6 rounded-full ${colorClass} text-white font-bold text-[10px] flex items-center justify-center shrink-0`}>
+                          {player?.avatar || item.playerName.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-xs text-slate-800 truncate">
+                              {item.playerName}
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-400">
+                              {item.timestamp}
+                            </span>
+                          </div>
+                          <p className="text-xs font-semibold text-slate-600 truncate">
+                            {item.description}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                        {item.source === 'voice' ? (
+                          <span className="px-2 py-0.5 bg-purple-100 text-purple-800 border border-purple-200 rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center gap-1">
+                            <Mic className="w-2.5 h-2.5" />
+                            Voice
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 bg-slate-100 text-slate-600 border border-slate-200 rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center gap-1">
+                            <Hand className="w-2.5 h-2.5" />
+                            Manual
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+
         </div>
 
         {/* Right: Leaderboard & Game State */}
@@ -1209,60 +1677,76 @@ export default function FarkleScorer({
 
           {/* History / Logs */}
           <div className="bg-white rounded-[32px] shadow-sm border-2 border-orange-100 p-6">
-            <h3 className="text-[10px] font-black text-teal-800 uppercase tracking-widest mb-4">
-              Round Scoring History
-            </h3>
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <h3 className="text-[10px] font-black text-teal-800 uppercase tracking-widest">
+                Round Scoring History
+              </h3>
+              {gameState.rounds.length > 0 && (
+                <span className="px-2 py-0.5 bg-orange-100/70 text-orange-800 text-[9px] font-black rounded-full uppercase tracking-wider">
+                  {gameState.rounds.length > 5 ? `Last 5 of ${gameState.rounds.length} Rounds` : `${gameState.rounds.length} ${gameState.rounds.length === 1 ? 'Round' : 'Rounds'}`}
+                </span>
+              )}
+            </div>
 
-            <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
-              {gameState.rounds.map((round, rIdx) => (
-                <div key={rIdx} className="p-3.5 bg-orange-50/30 rounded-2xl border border-orange-100/60 text-xs">
-                  <div className="font-black text-orange-600 uppercase tracking-wider text-[10px] mb-1.5 pb-1 border-b border-orange-100/40">Round {rIdx + 1}</div>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                    {gameState.players.map(p => {
-                      const rScore = round.scores[p.id];
-                      const wasFarkle = round.farkles[p.id];
-                      return (
-                        <div key={p.id} className="flex justify-between items-center text-gray-700 font-semibold">
-                          <span className="truncate flex items-center gap-1">
-                            {p.avatar && <span className="text-xs">{p.avatar}</span>}
-                            <span>{p.name}:</span>
-                          </span>
-                          <div className="flex items-center gap-1">
-                            <span className="font-mono font-bold">
-                              {wasFarkle ? (
-                                <span className="text-red-600 bg-red-50 border border-red-100 font-black rounded-lg px-2 py-0.5 text-[9px] uppercase tracking-wider">
-                                  Farkle
-                                </span>
-                              ) : rScore !== undefined ? (
-                                rScore.toLocaleString()
-                              ) : (
-                                '--'
-                              )}
+            <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+              {gameState.rounds
+                .map((round, originalIdx) => ({ round, originalIdx }))
+                .slice(-5)
+                .reverse()
+                .map(({ round, originalIdx: rIdx }) => (
+                  <div key={rIdx} className="p-3.5 bg-orange-50/30 rounded-2xl border border-orange-100/60 text-xs">
+                    <div className="flex items-center justify-between font-black text-orange-600 uppercase tracking-wider text-[10px] mb-1.5 pb-1 border-b border-orange-100/40">
+                      <span>Round {rIdx + 1}</span>
+                      {rIdx === gameState.rounds.length - 1 && (
+                        <span className="text-[9px] text-teal-800 bg-teal-50 border border-teal-200 px-1.5 py-0.2 rounded font-bold">Latest</span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                      {gameState.players.map(p => {
+                        const rScore = round.scores[p.id];
+                        const wasFarkle = round.farkles[p.id];
+                        return (
+                          <div key={p.id} className="flex justify-between items-center text-gray-700 font-semibold">
+                            <span className="truncate flex items-center gap-1">
+                              {p.avatar && <span className="text-xs">{p.avatar}</span>}
+                              <span>{p.name}:</span>
                             </span>
-                            {rScore !== undefined && (
-                              <button
-                                onClick={() => {
-                                  setEditingRoundData({
-                                    roundIdx: rIdx,
-                                    playerId: p.id,
-                                    playerName: p.name,
-                                    currentRoundScore: rScore,
-                                  });
-                                  setManualRoundScoreVal(rScore.toString());
-                                }}
-                                className="p-0.5 text-slate-400 hover:text-orange-600 rounded cursor-pointer"
-                                title="Edit Round Score"
-                              >
-                                <Pencil className="w-3 h-3" />
-                              </button>
-                            )}
+                            <div className="flex items-center gap-1">
+                              <span className="font-mono font-bold">
+                                {wasFarkle ? (
+                                  <span className="text-red-600 bg-red-50 border border-red-100 font-black rounded-lg px-2 py-0.5 text-[9px] uppercase tracking-wider">
+                                    Farkle
+                                  </span>
+                                ) : rScore !== undefined ? (
+                                  rScore.toLocaleString()
+                                ) : (
+                                  '--'
+                                )}
+                              </span>
+                              {rScore !== undefined && (
+                                <button
+                                  onClick={() => {
+                                    setEditingRoundData({
+                                      roundIdx: rIdx,
+                                      playerId: p.id,
+                                      playerName: p.name,
+                                      currentRoundScore: rScore,
+                                    });
+                                    setManualRoundScoreVal(rScore.toString());
+                                  }}
+                                  className="p-0.5 text-slate-400 hover:text-orange-600 rounded cursor-pointer"
+                                  title="Edit Round Score"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
               {gameState.rounds.length === 0 && (
                 <div className="text-center py-6 text-teal-800/40 text-xs font-semibold">
                   History will appear after scores are banked or players Farkle!

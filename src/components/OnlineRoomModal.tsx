@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, Wifi, Share2, Copy, Plus, LogIn, LogOut, Check, Sparkles, Gamepad2, X, AlertCircle, RefreshCw } from 'lucide-react';
+import { Users, Wifi, Share2, Copy, Plus, LogIn, LogOut, Check, Sparkles, Gamepad2, X, AlertCircle, RefreshCw, Play } from 'lucide-react';
 import { GameType, Player, GameRoomData } from '../types';
 import {
   createGameRoomInFirestore,
@@ -28,7 +28,7 @@ export const OnlineRoomModal: React.FC<OnlineRoomModalProps> = ({
   currentGameType,
   currentGameState,
   currentTurnScore,
-  savedPlayers,
+  savedPlayers = [],
   activeRoom,
   setActiveRoom,
   onRoomGameStateSync,
@@ -37,8 +37,8 @@ export const OnlineRoomModal: React.FC<OnlineRoomModalProps> = ({
   const [tab, setTab] = useState<'create' | 'join'>('create');
   const [selectedGameType, setSelectedGameType] = useState<GameType>(currentGameType);
   const [roomCodeInput, setRoomCodeInput] = useState<string>('');
-  const [selectedPlayerId, setSelectedPlayerId] = useState<string>(savedPlayers[0]?.id || '1');
-  const [customPlayerName, setCustomPlayerName] = useState<string>(savedPlayers[0]?.name || 'Player 1');
+  const [selectedPlayerId, setSelectedPlayerId] = useState<string>(savedPlayers?.[0]?.id || '1');
+  const [customPlayerName, setCustomPlayerName] = useState<string>(savedPlayers?.[0]?.name || 'Player 1');
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
@@ -56,15 +56,17 @@ export const OnlineRoomModal: React.FC<OnlineRoomModalProps> = ({
   const [generatedCode, setGeneratedCode] = useState<string>(generateRandomCode());
 
   useEffect(() => {
-    if (savedPlayers.length > 0 && !savedPlayers.some(p => p.id === selectedPlayerId)) {
-      setSelectedPlayerId(savedPlayers[0].id);
-      setCustomPlayerName(savedPlayers[0].name);
+    if (!isOpen) return;
+    const list = savedPlayers || [];
+    if (list.length > 0 && !list.some(p => p.id === selectedPlayerId)) {
+      setSelectedPlayerId(list[0].id);
+      setCustomPlayerName(list[0].name);
     }
-  }, [savedPlayers]);
+  }, [isOpen, savedPlayers, selectedPlayerId]);
 
   const handlePlayerSelect = (pId: string) => {
     setSelectedPlayerId(pId);
-    const found = savedPlayers.find(p => p.id === pId);
+    const found = (savedPlayers || []).find(p => p.id === pId);
     if (found) {
       setCustomPlayerName(found.name);
     }
@@ -74,11 +76,11 @@ export const OnlineRoomModal: React.FC<OnlineRoomModalProps> = ({
     setLoading(true);
     setErrorMessage(null);
     try {
-      const selectedPlayer = savedPlayers.find(p => p.id === selectedPlayerId) || {
-        id: selectedPlayerId || 'p1',
-        name: customPlayerName || 'Player 1',
+      const selectedPlayer = (savedPlayers || []).find(p => p.id === selectedPlayerId) || {
+        id: selectedPlayerId || `p-${deviceId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}`,
+        name: customPlayerName || 'Host',
         color: 'bg-orange-500 text-white',
-        avatar: '🎲',
+        avatar: '👑',
       };
 
       const room = await createGameRoomInFirestore(
@@ -109,9 +111,13 @@ export const OnlineRoomModal: React.FC<OnlineRoomModalProps> = ({
     setLoading(true);
     setErrorMessage(null);
     try {
-      const selectedPlayer = savedPlayers.find(p => p.id === selectedPlayerId) || {
-        id: selectedPlayerId || `p-${Date.now()}`,
-        name: customPlayerName || 'Player 1',
+      const playerUniqueId = selectedPlayerId && !['1', 'p1'].includes(selectedPlayerId)
+        ? selectedPlayerId
+        : `p-${deviceId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}`;
+
+      const selectedPlayer = (savedPlayers || []).find(p => p.id === selectedPlayerId) || {
+        id: playerUniqueId,
+        name: customPlayerName || 'Player 2',
         color: 'bg-emerald-500 text-white',
         avatar: '🎲',
       };
@@ -125,6 +131,9 @@ export const OnlineRoomModal: React.FC<OnlineRoomModalProps> = ({
       setActiveRoom(joinedRoom);
       onRoomGameStateSync(joinedRoom.gameType, joinedRoom.gameState, joinedRoom.turnScore ?? null);
       setLoading(false);
+      setTimeout(() => {
+        onClose();
+      }, 400);
     } catch (err: any) {
       setLoading(false);
       setErrorMessage(err.message || 'Failed to join room. Please check the code.');
@@ -239,9 +248,10 @@ export const OnlineRoomModal: React.FC<OnlineRoomModalProps> = ({
               <div className="pt-2 flex gap-3">
                 <button
                   onClick={onClose}
-                  className="flex-1 py-3 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 font-bold text-slate-800 dark:text-slate-200 rounded-2xl text-sm transition"
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 font-black text-white rounded-2xl text-sm transition shadow-lg flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  Back to Game
+                  <Play className="w-4 h-4 fill-current" />
+                  Go to Live Game Board
                 </button>
                 <button
                   onClick={handleLeaveRoom}
