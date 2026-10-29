@@ -4,26 +4,34 @@
  */
 
 export function safeJsonStringify(data: any): string {
-  const seen = new WeakSet();
+  const ancestors: any[] = [];
 
-  return JSON.stringify(data, (_key, value) => {
-    if (typeof value === 'object' && value !== null) {
-      // Filter out DOM nodes and React synthetic events
-      if (
-        (typeof HTMLElement !== 'undefined' && value instanceof HTMLElement) ||
-        (typeof Node !== 'undefined' && value instanceof Node) ||
-        '_reactName' in value ||
-        'nativeEvent' in value
-      ) {
-        return undefined;
-      }
-
-      // Filter out circular references
-      if (seen.has(value)) {
-        return undefined;
-      }
-      seen.add(value);
+  return JSON.stringify(data, function (this: any, _key, value) {
+    if (typeof value !== 'object' || value === null) {
+      return value;
     }
+
+    // Filter out DOM nodes and React synthetic events
+    if (
+      (typeof HTMLElement !== 'undefined' && value instanceof HTMLElement) ||
+      (typeof Node !== 'undefined' && value instanceof Node) ||
+      '_reactName' in value ||
+      'nativeEvent' in value
+    ) {
+      return undefined;
+    }
+
+    // Maintain ancestor chain for the current property path
+    while (ancestors.length > 0 && ancestors[ancestors.length - 1] !== this) {
+      ancestors.pop();
+    }
+
+    // Filter out true circular references only
+    if (ancestors.includes(value)) {
+      return undefined;
+    }
+
+    ancestors.push(value);
     return value;
   });
 }

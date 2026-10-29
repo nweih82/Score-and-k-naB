@@ -327,12 +327,12 @@ export const OnlineRoomModal: React.FC<OnlineRoomModalProps> = ({
                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
                       Select Game Mode
                     </label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {(['farkle', 'yahtzee', 'dominoes'] as GameType[]).map(gt => (
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                      {(['farkle', 'yahtzee', 'dominoes', 'spades', 'euchre'] as GameType[]).map(gt => (
                         <button
                           key={gt}
                           onClick={() => setSelectedGameType(gt)}
-                          className={`p-3 rounded-2xl text-xs font-black uppercase tracking-wider border-2 transition text-center ${
+                          className={`p-2.5 rounded-2xl text-xs font-black uppercase tracking-wider border-2 transition text-center ${
                             selectedGameType === gt
                               ? 'border-teal-500 bg-teal-600 text-white shadow-md'
                               : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-400'
@@ -341,6 +341,8 @@ export const OnlineRoomModal: React.FC<OnlineRoomModalProps> = ({
                           {gt === 'farkle' && '🎲 Farkle'}
                           {gt === 'yahtzee' && '📝 Yahtzee'}
                           {gt === 'dominoes' && '🁢 Dominoes'}
+                          {gt === 'spades' && '♠️ Spades'}
+                          {gt === 'euchre' && '♣️ Euchre'}
                         </button>
                       ))}
                     </div>

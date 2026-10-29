@@ -20,6 +20,118 @@ interface FarkleScorerProps {
   onOpenHouseRules?: () => void;
 }
 
+function normalizeFarkleState(
+  raw: any,
+  fallbackRules?: FarkleHouseRules
+): FarkleState | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const rawPlayers = Array.isArray(raw.players) ? raw.players.filter((p: any) => p && typeof p === 'object' && p.id) : [];
+  if (rawPlayers.length === 0) return null;
+
+  const validPlayers: Player[] = rawPlayers.map((p: any, idx: number) => ({
+    id: String(p.id),
+    name: typeof p.name === 'string' && p.name.trim() ? p.name : `Player ${idx + 1}`,
+    color: typeof p.color === 'string' && p.color.trim() ? p.color : 'bg-emerald-500 text-white',
+    avatar: typeof p.avatar === 'string' && p.avatar.trim() ? p.avatar : '🎲',
+  }));
+
+  const rawScores = raw.scores && typeof raw.scores === 'object' ? raw.scores : {};
+  const validScores: Record<string, number> = {};
+  validPlayers.forEach(p => {
+    const val = Number(rawScores[p.id]);
+    validScores[p.id] = Number.isFinite(val) ? val : 0;
+  });
+
+  const rawRounds = Array.isArray(raw.rounds) ? raw.rounds : [];
+  const validRounds: FarkleRound[] = rawRounds
+    .filter((r: any) => r && typeof r === 'object')
+    .map((r: any) => {
+      const scoresObj: Record<string, number> = {};
+      if (r.scores && typeof r.scores === 'object') {
+        Object.entries(r.scores).forEach(([k, v]) => {
+          if (typeof v === 'number' && Number.isFinite(v)) {
+            scoresObj[k] = v;
+          }
+        });
+      }
+      const farklesObj: Record<string, boolean> = {};
+      if (r.farkles && typeof r.farkles === 'object') {
+        Object.entries(r.farkles).forEach(([k, v]) => {
+          farklesObj[k] = Boolean(v);
+        });
+      }
+      return {
+        scores: scoresObj,
+        farkles: farklesObj,
+      };
+    });
+
+  const activePlayerExists = validPlayers.some(p => p.id === raw.activePlayerId);
+  const activePlayerId = activePlayerExists ? String(raw.activePlayerId) : validPlayers[0].id;
+
+  const mergedRules: FarkleHouseRules = {
+    ...DEFAULT_FARKLE_RULES,
+    ...(fallbackRules || {}),
+    ...(raw.rules && typeof raw.rules === 'object' ? raw.rules : {}),
+  };
+
+  const consecutiveFarkles: Record<string, number> = {};
+  if (raw.consecutiveFarkles && typeof raw.consecutiveFarkles === 'object') {
+    Object.entries(raw.consecutiveFarkles).forEach(([k, v]) => {
+      const n = Number(v);
+      consecutiveFarkles[k] = Number.isFinite(n) && n >= 0 ? n : 0;
+    });
+  }
+
+  const recentActions: ActionLogItem[] = Array.isArray(raw.recentActions)
+    ? raw.recentActions
+        .filter((item: any) => item && typeof item === 'object' && item.id)
+        .map((item: any) => ({
+          id: String(item.id),
+          timestamp: typeof item.timestamp === 'string' ? item.timestamp : '',
+          playerId: String(item.playerId || ''),
+          playerName: typeof item.playerName === 'string' ? item.playerName : 'Player',
+          playerColor: typeof item.playerColor === 'string' ? item.playerColor : 'bg-orange-500 text-white',
+          actionType: item.actionType || 'bank',
+          description: typeof item.description === 'string' ? item.description : '',
+          points: typeof item.points === 'number' && Number.isFinite(item.points) ? item.points : 0,
+          source: item.source === 'voice' ? 'voice' : 'manual',
+        }))
+    : [];
+
+  let finalRoundState = null;
+  if (
+    raw.finalRoundState &&
+    typeof raw.finalRoundState === 'object' &&
+    raw.finalRoundState.leaderId &&
+    Array.isArray(raw.finalRoundState.playersPendingTurn)
+  ) {
+    finalRoundState = {
+      leaderId: String(raw.finalRoundState.leaderId),
+      highScoreToBeat: Number(raw.finalRoundState.highScoreToBeat) || 0,
+      playersPendingTurn: raw.finalRoundState.playersPendingTurn.map((id: any) => String(id)),
+    };
+  }
+
+  const currentRound = Math.max(1, Number(raw.currentRound) || Math.max(1, validRounds.length));
+  const targetScore = Math.max(100, Number(raw.targetScore) || mergedRules.targetScore || 10000);
+
+  return {
+    players: validPlayers,
+    scores: validScores,
+    rounds: validRounds,
+    currentRound,
+    targetScore,
+    winnerId: raw.winnerId ? String(raw.winnerId) : null,
+    activePlayerId,
+    turnHistory: Array.isArray(raw.turnHistory) ? raw.turnHistory : [],
+    finalRoundState,
+    recentActions,
+    rules: mergedRules,
+    consecutiveFarkles,
+  };
+}
+
 export default function FarkleScorer({
   players,
   onGameFinished,
@@ -33,10 +145,7 @@ export default function FarkleScorer({
 }: FarkleScorerProps) {
   const { playBank, playFarkle, playUndo } = useSound();
   const [gameState, setGameState] = useState<FarkleState | null>(() => {
-    if (externalGameState && Array.isArray(externalGameState.players) && externalGameState.players.length > 0) {
-      return externalGameState;
-    }
-    return null;
+    return normalizeFarkleState(externalGameState, houseRules);
   });
   const [historyStack, setHistoryStack] = useState<FarkleState[]>([]);
   const [targetScoreInput, setTargetScoreInput] = useState(() => {
@@ -47,10 +156,8 @@ export default function FarkleScorer({
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
   const [houseRuleAlert, setHouseRuleAlert] = useState<string | null>(null);
   const [isSettingUp, setIsSettingUp] = useState<boolean>(() => {
-    if (externalGameState && Array.isArray(externalGameState.players) && externalGameState.players.length > 0) {
-      return false;
-    }
-    return true;
+    const normalized = normalizeFarkleState(externalGameState, houseRules);
+    return !normalized;
   });
 
   // Auto-dismiss house rule alerts
@@ -63,16 +170,21 @@ export default function FarkleScorer({
 
   const pushStateToHistory = () => {
     if (gameState) {
-      setHistoryStack(prev => [...prev, safeClone(gameState)]);
+      const cloned = normalizeFarkleState(safeClone(gameState), houseRules);
+      if (cloned) {
+        setHistoryStack(prev => [...prev, cloned]);
+      }
     }
   };
 
   const handleUndo = () => {
     if (historyStack.length === 0) return;
     playUndo();
-    const previous = historyStack[historyStack.length - 1];
+    const previous = normalizeFarkleState(historyStack[historyStack.length - 1], houseRules);
     setHistoryStack(prev => prev.slice(0, prev.length - 1));
-    setGameState(previous);
+    if (previous) {
+      setGameState(previous);
+    }
     setTurnScore(0);
     setCustomScoreInput('');
   };
@@ -120,13 +232,19 @@ export default function FarkleScorer({
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed && parsed.gameState) {
-          setGameState(parsed.gameState);
-          if (parsed.turnScore !== undefined) setTurnScore(parsed.turnScore);
+        const normalized = normalizeFarkleState(parsed?.gameState, houseRules);
+        if (normalized) {
+          setGameState(normalized);
+          if (typeof parsed.turnScore === 'number' && Number.isFinite(parsed.turnScore)) {
+            setTurnScore(parsed.turnScore);
+          }
           setIsSettingUp(false);
+        } else {
+          localStorage.removeItem('scorekeeper_saved_farkle');
         }
       } catch (err) {
         console.error("Error loading saved Farkle game", err);
+        localStorage.removeItem('scorekeeper_saved_farkle');
       }
     }
   }, [isOnlineSynced]);
@@ -140,12 +258,13 @@ export default function FarkleScorer({
 
   // Listen to external online game room updates
   useEffect(() => {
-    if (!externalGameState || !Array.isArray(externalGameState.players) || externalGameState.players.length === 0) {
+    const normalizedExternal = normalizeFarkleState(externalGameState, houseRules);
+    if (!normalizedExternal) {
       return;
     }
 
     const incomingJson = safeJsonStringify({
-      gameState: externalGameState,
+      gameState: normalizedExternal,
       turnScore: externalTurnScore ?? 0,
     });
 
@@ -168,7 +287,7 @@ export default function FarkleScorer({
     isIncomingSyncRef.current = true;
     lastReceivedExternalJsonRef.current = incomingJson;
 
-    setGameState(externalGameState);
+    setGameState(normalizedExternal);
     setIsSettingUp(false);
     if (externalTurnScore !== undefined && externalTurnScore !== null) {
       setTurnScore(externalTurnScore);
@@ -332,12 +451,22 @@ export default function FarkleScorer({
     if (!gameState) return;
     if (amountToBank <= 0) return;
 
-    const activeRules = gameState.rules || houseRules || loadActiveHouseRules().farkle;
+    const activeRules: FarkleHouseRules = {
+      ...DEFAULT_FARKLE_RULES,
+      ...(houseRules || loadActiveHouseRules().farkle),
+      ...(gameState.rules || {}),
+    };
     const { activePlayerId, scores, rounds, players: gamePlayers, targetScore, finalRoundState } = gameState;
-    const currentScore = scores[activePlayerId] || 0;
+    if (!Array.isArray(gamePlayers) || gamePlayers.length === 0) return;
+
+    const rawIndex = gamePlayers.findIndex(p => p.id === activePlayerId);
+    const activeIndex = rawIndex >= 0 ? rawIndex : 0;
+    const activePlayer = gamePlayers[activeIndex] || gamePlayers[0];
+    const resolvedPlayerId = activePlayer.id;
+    const currentScore = scores?.[resolvedPlayerId] || 0;
 
     // Validate opening minimum house rule
-    if (currentScore === 0 && activeRules.openingMinimum > 0 && amountToBank < activeRules.openingMinimum) {
+    if (currentScore === 0 && (activeRules.openingMinimum || 0) > 0 && amountToBank < activeRules.openingMinimum) {
       playFarkle();
       setHouseRuleAlert(
         `House Rule: Opening minimum is ${activeRules.openingMinimum.toLocaleString()} pts! Turn score was ${amountToBank.toLocaleString()} pts. Must score at least ${activeRules.openingMinimum.toLocaleString()} pts on a single turn to get on the board.`
@@ -350,21 +479,20 @@ export default function FarkleScorer({
     pushStateToHistory();
     playBank();
 
-    const activePlayer = gamePlayers.find(p => p.id === activePlayerId);
     const newScore = currentScore + amountToBank;
 
     // Reset consecutive farkles for this player on a banked turn
     const updatedConsecutiveFarkles = {
       ...(gameState.consecutiveFarkles || {}),
-      [activePlayerId]: 0,
+      [resolvedPlayerId]: 0,
     };
 
     const actionItem: ActionLogItem = {
       id: Date.now().toString() + Math.random().toString().substring(2, 5),
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      playerId: activePlayerId,
+      playerId: resolvedPlayerId,
       playerName: activePlayer?.name || 'Player',
-      playerColor: activePlayer?.color,
+      playerColor: activePlayer?.color || 'bg-orange-500 text-white',
       actionType: 'bank',
       description: `Banked +${amountToBank.toLocaleString()} pts`,
       points: amountToBank,
@@ -374,25 +502,38 @@ export default function FarkleScorer({
 
     // Save score
     const updatedScores = {
-      ...scores,
-      [activePlayerId]: newScore,
+      ...(scores || {}),
+      [resolvedPlayerId]: newScore,
     };
 
-    // Log the round
-    const activeIndex = gamePlayers.findIndex(p => p.id === activePlayerId);
-    let updatedRounds = [...rounds];
-    
-    // Find or create current round entry
-    let currentRoundObj = updatedRounds[gameState.currentRound - 1];
-    if (!currentRoundObj) {
-      currentRoundObj = { scores: {}, farkles: {} };
-      updatedRounds.push(currentRoundObj);
+    // Log the round immutably and defensively
+    const safeRounds = Array.isArray(rounds) ? rounds.filter(Boolean) : [];
+    const updatedRounds: FarkleRound[] = safeRounds.map(r => ({
+      scores: { ...(r?.scores || {}) },
+      farkles: { ...(r?.farkles || {}) },
+    }));
+    const roundIdx = Math.max(0, (Number(gameState.currentRound) || 1) - 1);
+    while (updatedRounds.length <= roundIdx) {
+      updatedRounds.push({ scores: {}, farkles: {} });
     }
-    
-    currentRoundObj.scores[activePlayerId] = amountToBank;
-    currentRoundObj.farkles[activePlayerId] = false;
+    updatedRounds[roundIdx] = {
+      scores: {
+        ...updatedRounds[roundIdx].scores,
+        [resolvedPlayerId]: amountToBank,
+      },
+      farkles: {
+        ...updatedRounds[roundIdx].farkles,
+        [resolvedPlayerId]: false,
+      },
+    };
 
-    let newFinalRoundState = finalRoundState ? { ...finalRoundState } : null;
+    let newFinalRoundState = finalRoundState
+      ? {
+          leaderId: finalRoundState.leaderId,
+          highScoreToBeat: Number(finalRoundState.highScoreToBeat) || 0,
+          playersPendingTurn: [...(finalRoundState.playersPendingTurn || [])],
+        }
+      : null;
     let newWinnerId: string | null = null;
 
     if (!newFinalRoundState) {
@@ -400,7 +541,7 @@ export default function FarkleScorer({
       if (newScore >= targetScore) {
         if (gamePlayers.length === 1) {
           // Single player: win immediately
-          newWinnerId = activePlayerId;
+          newWinnerId = resolvedPlayerId;
         } else {
           // Trigger Final Round ("Beat the Score")!
           const pending: string[] = [];
@@ -408,7 +549,7 @@ export default function FarkleScorer({
             pending.push(gamePlayers[(activeIndex + i) % gamePlayers.length].id);
           }
           newFinalRoundState = {
-            leaderId: activePlayerId,
+            leaderId: resolvedPlayerId,
             highScoreToBeat: newScore,
             playersPendingTurn: pending,
           };
@@ -422,12 +563,12 @@ export default function FarkleScorer({
           newPending.push(gamePlayers[(activeIndex + i) % gamePlayers.length].id);
         }
         newFinalRoundState = {
-          leaderId: activePlayerId,
+          leaderId: resolvedPlayerId,
           highScoreToBeat: newScore,
           playersPendingTurn: newPending,
         };
       } else {
-        const remainingPending = newFinalRoundState.playersPendingTurn.filter(id => id !== activePlayerId);
+        const remainingPending = newFinalRoundState.playersPendingTurn.filter(id => id !== resolvedPlayerId);
         if (remainingPending.length === 0) {
           newWinnerId = newFinalRoundState.leaderId;
           newFinalRoundState = null;
@@ -438,7 +579,7 @@ export default function FarkleScorer({
     }
 
     // Determine next player
-    let nextPlayerId = activePlayerId;
+    let nextPlayerId = resolvedPlayerId;
     if (!newWinnerId) {
       if (newFinalRoundState && newFinalRoundState.playersPendingTurn.length > 0) {
         nextPlayerId = newFinalRoundState.playersPendingTurn[0];
@@ -449,7 +590,7 @@ export default function FarkleScorer({
     }
 
     const isNewRound = (activeIndex + 1) % gamePlayers.length === 0;
-    const nextRound = isNewRound ? gameState.currentRound + 1 : gameState.currentRound;
+    const nextRound = isNewRound ? (Number(gameState.currentRound) || 1) + 1 : (Number(gameState.currentRound) || 1);
 
     setGameState(prev => {
       if (!prev) return null;
@@ -484,42 +625,52 @@ export default function FarkleScorer({
 
   const handleFarkle = (sourceInput?: any) => {
     if (!gameState) return;
+    const { activePlayerId, rounds, players: gamePlayers, finalRoundState } = gameState;
+    if (!Array.isArray(gamePlayers) || gamePlayers.length === 0) return;
+
     const source: 'manual' | 'voice' = sourceInput === 'voice' ? 'voice' : 'manual';
 
     pushStateToHistory();
     playFarkle();
-    const { activePlayerId, rounds, players: gamePlayers, finalRoundState } = gameState;
-    const activePlayer = gamePlayers.find(p => p.id === activePlayerId);
-    const activeIndex = gamePlayers.findIndex(p => p.id === activePlayerId);
 
-    const activeRules = gameState.rules || houseRules || loadActiveHouseRules().farkle;
-    const currentConsecutive = (gameState.consecutiveFarkles?.[activePlayerId] || 0) + 1;
-    let penaltyDeduction = 0;
-    let updatedConsecutiveFarkles = {
-      ...(gameState.consecutiveFarkles || {}),
-      [activePlayerId]: currentConsecutive,
+    const rawIndex = gamePlayers.findIndex(p => p.id === activePlayerId);
+    const activeIndex = rawIndex >= 0 ? rawIndex : 0;
+    const activePlayer = gamePlayers[activeIndex] || gamePlayers[0];
+    const resolvedPlayerId = activePlayer.id;
+
+    const activeRules: FarkleHouseRules = {
+      ...DEFAULT_FARKLE_RULES,
+      ...(houseRules || loadActiveHouseRules().farkle),
+      ...(gameState.rules || {}),
     };
-    let newScore = gameState.scores[activePlayerId] || 0;
+    const threeFarklesPenalty = Number(activeRules.threeFarklesPenalty) || 0;
+    const currentConsecutive = (Number(gameState.consecutiveFarkles?.[resolvedPlayerId]) || 0) + 1;
+    let penaltyDeduction = 0;
+    const updatedConsecutiveFarkles: Record<string, number> = {
+      ...(gameState.consecutiveFarkles || {}),
+      [resolvedPlayerId]: currentConsecutive,
+    };
+    let newScore = Number(gameState.scores?.[resolvedPlayerId]) || 0;
 
-    if (currentConsecutive >= 3 && activeRules.threeFarklesPenalty > 0) {
-      penaltyDeduction = activeRules.threeFarklesPenalty;
+    if (currentConsecutive >= 3 && threeFarklesPenalty > 0) {
+      penaltyDeduction = threeFarklesPenalty;
       newScore = Math.max(0, newScore - penaltyDeduction);
-      updatedConsecutiveFarkles[activePlayerId] = 0; // reset streak after penalty
+      updatedConsecutiveFarkles[resolvedPlayerId] = 0; // reset streak after penalty
       setHouseRuleAlert(
         `⚠️ 3 Consecutive Farkles! Penalty of -${penaltyDeduction.toLocaleString()} pts applied to ${activePlayer?.name || 'Player'}.`
       );
-    } else if (currentConsecutive === 2 && activeRules.threeFarklesPenalty > 0) {
+    } else if (currentConsecutive === 2 && threeFarklesPenalty > 0) {
       setHouseRuleAlert(
-        `⚠️ Warning: ${activePlayer?.name || 'Player'} has 2 consecutive Farkles! 1 more will trigger a -${activeRules.threeFarklesPenalty.toLocaleString()} pt penalty.`
+        `⚠️ Warning: ${activePlayer?.name || 'Player'} has 2 consecutive Farkles! 1 more will trigger a -${threeFarklesPenalty.toLocaleString()} pt penalty.`
       );
     }
 
     const actionItem: ActionLogItem = {
       id: Date.now().toString() + Math.random().toString().substring(2, 5),
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      playerId: activePlayerId,
+      playerId: resolvedPlayerId,
       playerName: activePlayer?.name || 'Player',
-      playerColor: activePlayer?.color,
+      playerColor: activePlayer?.color || 'bg-orange-500 text-white',
       actionType: 'farkle',
       description: penaltyDeduction > 0
         ? `Farkled 3 in a row! Penalty: -${penaltyDeduction.toLocaleString()} pts`
@@ -529,25 +680,43 @@ export default function FarkleScorer({
     };
     const updatedRecentActions = [actionItem, ...(gameState.recentActions || [])].slice(0, 20);
 
-    const updatedScores = penaltyDeduction > 0
-      ? { ...gameState.scores, [activePlayerId]: newScore }
-      : gameState.scores;
+    const updatedScores = {
+      ...(gameState.scores || {}),
+      [resolvedPlayerId]: newScore,
+    };
 
-    // Record 0 points and Farkle
-    let updatedRounds = [...rounds];
-    let currentRoundObj = updatedRounds[gameState.currentRound - 1];
-    if (!currentRoundObj) {
-      currentRoundObj = { scores: {}, farkles: {} };
-      updatedRounds.push(currentRoundObj);
+    // Record 0 points and Farkle immutably and defensively
+    const safeRounds = Array.isArray(rounds) ? rounds.filter(Boolean) : [];
+    const updatedRounds: FarkleRound[] = safeRounds.map(r => ({
+      scores: { ...(r?.scores || {}) },
+      farkles: { ...(r?.farkles || {}) },
+    }));
+    const roundIdx = Math.max(0, (Number(gameState.currentRound) || 1) - 1);
+    while (updatedRounds.length <= roundIdx) {
+      updatedRounds.push({ scores: {}, farkles: {} });
     }
-    currentRoundObj.scores[activePlayerId] = 0;
-    currentRoundObj.farkles[activePlayerId] = true;
+    updatedRounds[roundIdx] = {
+      scores: {
+        ...updatedRounds[roundIdx].scores,
+        [resolvedPlayerId]: 0,
+      },
+      farkles: {
+        ...updatedRounds[roundIdx].farkles,
+        [resolvedPlayerId]: true,
+      },
+    };
 
-    let newFinalRoundState = finalRoundState ? { ...finalRoundState } : null;
+    let newFinalRoundState = finalRoundState
+      ? {
+          leaderId: finalRoundState.leaderId,
+          highScoreToBeat: Number(finalRoundState.highScoreToBeat) || 0,
+          playersPendingTurn: [...(finalRoundState.playersPendingTurn || [])],
+        }
+      : null;
     let newWinnerId: string | null = null;
 
     if (newFinalRoundState) {
-      const remainingPending = newFinalRoundState.playersPendingTurn.filter(id => id !== activePlayerId);
+      const remainingPending = newFinalRoundState.playersPendingTurn.filter(id => id !== resolvedPlayerId);
       if (remainingPending.length === 0) {
         newWinnerId = newFinalRoundState.leaderId;
         newFinalRoundState = null;
@@ -556,7 +725,7 @@ export default function FarkleScorer({
       }
     }
 
-    let nextPlayerId = activePlayerId;
+    let nextPlayerId = resolvedPlayerId;
     if (!newWinnerId) {
       if (newFinalRoundState && newFinalRoundState.playersPendingTurn.length > 0) {
         nextPlayerId = newFinalRoundState.playersPendingTurn[0];
@@ -567,7 +736,7 @@ export default function FarkleScorer({
     }
 
     const isNewRound = (activeIndex + 1) % gamePlayers.length === 0;
-    const nextRound = isNewRound ? gameState.currentRound + 1 : gameState.currentRound;
+    const nextRound = isNewRound ? (Number(gameState.currentRound) || 1) + 1 : (Number(gameState.currentRound) || 1);
 
     setGameState(prev => {
       if (!prev) return null;
@@ -677,11 +846,11 @@ export default function FarkleScorer({
       updatedRounds[roundIdx] = {
         ...updatedRounds[roundIdx],
         scores: {
-          ...updatedRounds[roundIdx].scores,
+          ...(updatedRounds[roundIdx]?.scores || {}),
           [playerId]: newScore,
         },
         farkles: {
-          ...updatedRounds[roundIdx].farkles,
+          ...(updatedRounds[roundIdx]?.farkles || {}),
           [playerId]: newScore === 0,
         },
       };
@@ -738,13 +907,17 @@ export default function FarkleScorer({
     if (!gameState || !playerToRemoveId) return;
     pushStateToHistory();
     const remainingPlayers = gameState.players.filter(p => p.id !== playerToRemoveId);
+    if (remainingPlayers.length === 0) {
+      setPlayerToRemoveId(null);
+      return;
+    }
     const newScores = { ...gameState.scores };
     delete newScores[playerToRemoveId];
 
     let newActivePlayerId = gameState.activePlayerId;
     if (gameState.activePlayerId === playerToRemoveId) {
-      const removedIdx = gameState.players.findIndex(p => p.id === playerToRemoveId);
-      const nextPlayer = remainingPlayers[removedIdx % remainingPlayers.length];
+      const removedIdx = Math.max(0, gameState.players.findIndex(p => p.id === playerToRemoveId));
+      const nextPlayer = remainingPlayers[removedIdx % remainingPlayers.length] || remainingPlayers[0];
       newActivePlayerId = nextPlayer.id;
       setTurnScore(0);
     }
@@ -975,6 +1148,7 @@ export default function FarkleScorer({
           <button
             onClick={startNewGame}
             disabled={selectedPlayers.length === 0}
+            data-tv-action="primary"
             className="w-full py-3.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:hover:bg-teal-600 text-white font-black rounded-full text-sm flex items-center justify-center gap-2 transition-colors shadow-md cursor-pointer uppercase tracking-wider"
           >
             <Play className="w-4 h-4 fill-current" />
@@ -1167,6 +1341,7 @@ export default function FarkleScorer({
               <button
                 onClick={handleUndo}
                 disabled={historyStack.length === 0}
+                data-tv-action="undo"
                 className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-30 disabled:hover:bg-amber-500 text-teal-950 font-black rounded-full text-[10px] flex items-center gap-1 transition-all cursor-pointer uppercase tracking-wider shadow-xs"
                 title="Undo last score entry"
               >
@@ -1176,6 +1351,7 @@ export default function FarkleScorer({
               {onOpenHouseRules && (
                 <button
                   onClick={onOpenHouseRules}
+                  data-tv-action="rules"
                   className="px-2.5 py-1 bg-teal-700/70 hover:bg-teal-700 text-teal-100 font-bold rounded-full text-[10px] flex items-center gap-1 transition-all cursor-pointer border border-teal-500/30"
                   title="View or modify active House Rules"
                 >
@@ -1185,7 +1361,7 @@ export default function FarkleScorer({
               )}
             </div>
             <div className="flex items-center gap-3 mt-1.5">
-              <div className={`w-4 h-4 rounded-full ${activePlayer.color.split(' ')[0]} ring-2 ring-white`} />
+              <div className={`w-4 h-4 rounded-full ${(activePlayer.color || 'bg-emerald-500 text-white').split(' ')[0]} ring-2 ring-white`} />
               <h2 className="text-2xl font-black tracking-tight uppercase">
                 {activePlayer.name}'s Roll
               </h2>
@@ -1292,6 +1468,7 @@ export default function FarkleScorer({
                 <button
                   onClick={handleBank}
                   disabled={turnScore === 0}
+                  data-tv-action="primary"
                   className="py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 text-white font-black rounded-full text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md uppercase tracking-wider"
                 >
                   <CheckCircle className="w-4 h-4" />
@@ -1300,6 +1477,7 @@ export default function FarkleScorer({
 
                 <button
                   onClick={() => handleFarkle('manual')}
+                  data-tv-action="danger"
                   className="py-3.5 px-4 bg-red-500 hover:bg-red-600 text-white font-black rounded-full text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md uppercase tracking-wider"
                 >
                   <AlertCircle className="w-4 h-4" />
@@ -1518,7 +1696,7 @@ export default function FarkleScorer({
                 .map((player, idx) => {
                   const score = gameState.scores[player.id] || 0;
                   const isCurrent = player.id === gameState.activePlayerId;
-                  const colorClass = player.color.split(' ')[0];
+                  const colorClass = (player.color || 'bg-emerald-500 text-white').split(' ')[0];
 
                   return (
                     <div
@@ -1689,8 +1867,9 @@ export default function FarkleScorer({
             </div>
 
             <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
-              {gameState.rounds
+              {(gameState.rounds || [])
                 .map((round, originalIdx) => ({ round, originalIdx }))
+                .filter(item => item.round && typeof item.round === 'object')
                 .slice(-5)
                 .reverse()
                 .map(({ round, originalIdx: rIdx }) => (
@@ -1703,8 +1882,8 @@ export default function FarkleScorer({
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
                       {gameState.players.map(p => {
-                        const rScore = round.scores[p.id];
-                        const wasFarkle = round.farkles[p.id];
+                        const rScore = round?.scores?.[p.id];
+                        const wasFarkle = Boolean(round?.farkles?.[p.id]);
                         return (
                           <div key={p.id} className="flex justify-between items-center text-gray-700 font-semibold">
                             <span className="truncate flex items-center gap-1">
@@ -1717,13 +1896,13 @@ export default function FarkleScorer({
                                   <span className="text-red-600 bg-red-50 border border-red-100 font-black rounded-lg px-2 py-0.5 text-[9px] uppercase tracking-wider">
                                     Farkle
                                   </span>
-                                ) : rScore !== undefined ? (
+                                ) : typeof rScore === 'number' ? (
                                   rScore.toLocaleString()
                                 ) : (
                                   '--'
                                 )}
                               </span>
-                              {rScore !== undefined && (
+                              {typeof rScore === 'number' && (
                                 <button
                                   onClick={() => {
                                     setEditingRoundData({
@@ -1747,7 +1926,7 @@ export default function FarkleScorer({
                     </div>
                   </div>
                 ))}
-              {gameState.rounds.length === 0 && (
+              {(!gameState.rounds || gameState.rounds.length === 0) && (
                 <div className="text-center py-6 text-teal-800/40 text-xs font-semibold">
                   History will appear after scores are banked or players Farkle!
                 </div>

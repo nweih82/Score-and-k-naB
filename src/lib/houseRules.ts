@@ -1,4 +1,4 @@
-import { FarkleHouseRules, YahtzeeHouseRules, HouseRulesPreset } from '../types';
+import { FarkleHouseRules, YahtzeeHouseRules, SpadesHouseRules, EuchreHouseRules, HouseRulesPreset } from '../types';
 
 export const DEFAULT_FARKLE_RULES: FarkleHouseRules = {
   targetScore: 10000,
@@ -25,20 +25,42 @@ export const DEFAULT_YAHTZEE_RULES: YahtzeeHouseRules = {
   jokerRule: 'standard',
 };
 
+export const DEFAULT_SPADES_RULES: SpadesHouseRules = {
+  targetScore: 500,
+  gameMode: 'partnership',
+  includeJokers: false,
+  nilBonus: 100,
+  blindNilBonus: 200,
+  bagPenalty: 100,
+  bagThreshold: 10,
+  minBid: 4,
+};
+
+export const DEFAULT_EUCHRE_RULES: EuchreHouseRules = {
+  targetScore: 10,
+  gameMode: 'partnership',
+  aloneMarchPoints: 4,
+  euchrePoints: 2,
+  stickTheDealer: true,
+  bennyJoker: false,
+};
+
 export const BUILT_IN_HOUSE_RULES_PRESETS: HouseRulesPreset[] = [
   {
     id: 'preset_standard',
     name: 'Standard Tournament',
-    description: 'Official tournament rules. Farkle 10,000 pts with 500 min to open; Yahtzee 63 threshold (+35 bonus, +100 extra Yahtzee).',
+    description: 'Official tournament rules. Farkle 10k, Yahtzee 63 (+35), Spades 500 Partnership (100 Nil / -100 Bags), Euchre 10 pts Partnership.',
     isBuiltIn: true,
     createdAt: '2026-01-01T00:00:00.000Z',
     farkle: { ...DEFAULT_FARKLE_RULES },
     yahtzee: { ...DEFAULT_YAHTZEE_RULES },
+    spades: { ...DEFAULT_SPADES_RULES },
+    euchre: { ...DEFAULT_EUCHRE_RULES },
   },
   {
     id: 'preset_blitz',
     name: 'Quick Play / Blitz',
-    description: 'Fast, high-energy games. Farkle 5,000 pts target with zero opening minimum; Yahtzee with 60 threshold and +50 upper bonus.',
+    description: 'Fast, high-energy games. Farkle 5k, Yahtzee 60 (+50), Spades 250 pts w/ High & Low Jokers, Euchre 7 pts.',
     isBuiltIn: true,
     createdAt: '2026-01-01T00:00:00.000Z',
     farkle: {
@@ -53,11 +75,21 @@ export const BUILT_IN_HOUSE_RULES_PRESETS: HouseRulesPreset[] = [
       upperBonusAmount: 50,
       extraYahtzeeBonus: 150,
     },
+    spades: {
+      ...DEFAULT_SPADES_RULES,
+      targetScore: 250,
+      includeJokers: true,
+    },
+    euchre: {
+      ...DEFAULT_EUCHRE_RULES,
+      targetScore: 7,
+      stickTheDealer: true,
+    },
   },
   {
     id: 'preset_hardcore',
-    name: 'High Stakes / Hardcore',
-    description: 'Competitive endurance match. Farkle 15,000 pts, 1,000 min to open, -1,000 penalty for 3 Farkles, mandatory Hot Dice roll; Yahtzee 65 threshold.',
+    name: 'High Stakes / Cutthroat',
+    description: 'Competitive individual showdowns! Spades & Euchre set to Cutthroat mode with High & Low Jokers; Farkle 15k.',
     isBuiltIn: true,
     createdAt: '2026-01-01T00:00:00.000Z',
     farkle: {
@@ -74,11 +106,24 @@ export const BUILT_IN_HOUSE_RULES_PRESETS: HouseRulesPreset[] = [
       extraYahtzeeBonus: 100,
       jokerRule: 'strict_bonus_only',
     },
+    spades: {
+      ...DEFAULT_SPADES_RULES,
+      targetScore: 500,
+      gameMode: 'cutthroat',
+      includeJokers: true,
+      minBid: 1,
+    },
+    euchre: {
+      ...DEFAULT_EUCHRE_RULES,
+      targetScore: 10,
+      gameMode: 'cutthroat',
+      stickTheDealer: true,
+    },
   },
   {
     id: 'preset_wild',
     name: 'Party Night / Wild House',
-    description: 'Fun & chaotic house variations! Farkle with Piggybacking (inheriting dice) and -500 penalty; Yahtzee with +75 bonus and +150 Yahtzee credit.',
+    description: 'Fun house variations! Spades w/ High & Low Jokers (No Bag Penalty), Euchre w/ Benny Joker, Farkle w/ Piggybacking.',
     isBuiltIn: true,
     createdAt: '2026-01-01T00:00:00.000Z',
     farkle: {
@@ -99,6 +144,19 @@ export const BUILT_IN_HOUSE_RULES_PRESETS: HouseRulesPreset[] = [
       largeStraightScore: 45,
       jokerRule: 'free_choice',
     },
+    spades: {
+      ...DEFAULT_SPADES_RULES,
+      targetScore: 500,
+      includeJokers: true,
+      bagPenalty: 0,
+      nilBonus: 150,
+    },
+    euchre: {
+      ...DEFAULT_EUCHRE_RULES,
+      targetScore: 10,
+      bennyJoker: true,
+      euchrePoints: 2,
+    },
   },
 ];
 
@@ -113,10 +171,13 @@ export function loadHouseRulesPresets(): HouseRulesPreset[] {
       return BUILT_IN_HOUSE_RULES_PRESETS;
     }
     const customList: HouseRulesPreset[] = JSON.parse(stored);
-    // Combine built-in presets with custom ones, preventing duplication
-    const customFiltered = customList.filter(
-      (c) => !BUILT_IN_HOUSE_RULES_PRESETS.some((b) => b.id === c.id)
-    );
+    const customFiltered = customList
+      .filter((c) => !BUILT_IN_HOUSE_RULES_PRESETS.some((b) => b.id === c.id))
+      .map((c) => ({
+        ...c,
+        spades: { ...DEFAULT_SPADES_RULES, ...(c.spades || {}) },
+        euchre: { ...DEFAULT_EUCHRE_RULES, ...(c.euchre || {}) },
+      }));
     return [...BUILT_IN_HOUSE_RULES_PRESETS, ...customFiltered];
   } catch (err) {
     console.error('Error reading house rules presets', err);
@@ -152,6 +213,8 @@ export function saveActivePresetId(presetId: string): void {
 export function loadActiveHouseRules(): {
   farkle: FarkleHouseRules;
   yahtzee: YahtzeeHouseRules;
+  spades: SpadesHouseRules;
+  euchre: EuchreHouseRules;
 } {
   try {
     const stored = localStorage.getItem(ACTIVE_RULES_KEY);
@@ -160,32 +223,51 @@ export function loadActiveHouseRules(): {
       return {
         farkle: { ...DEFAULT_FARKLE_RULES, ...(parsed.farkle || {}) },
         yahtzee: { ...DEFAULT_YAHTZEE_RULES, ...(parsed.yahtzee || {}) },
+        spades: { ...DEFAULT_SPADES_RULES, ...(parsed.spades || {}) },
+        euchre: { ...DEFAULT_EUCHRE_RULES, ...(parsed.euchre || {}) },
       };
     }
   } catch (err) {
     console.error('Error reading active house rules', err);
   }
 
-  // Fallback to active preset or default
   const activePresetId = loadActivePresetId();
   const presets = loadHouseRulesPresets();
   const found = presets.find((p) => p.id === activePresetId);
   if (found) {
-    return { farkle: { ...found.farkle }, yahtzee: { ...found.yahtzee } };
+    return {
+      farkle: { ...found.farkle },
+      yahtzee: { ...found.yahtzee },
+      spades: { ...DEFAULT_SPADES_RULES, ...(found.spades || {}) },
+      euchre: { ...DEFAULT_EUCHRE_RULES, ...(found.euchre || {}) },
+    };
   }
 
   return {
     farkle: { ...DEFAULT_FARKLE_RULES },
     yahtzee: { ...DEFAULT_YAHTZEE_RULES },
+    spades: { ...DEFAULT_SPADES_RULES },
+    euchre: { ...DEFAULT_EUCHRE_RULES },
   };
 }
 
 export function saveActiveHouseRules(rules: {
   farkle: FarkleHouseRules;
   yahtzee: YahtzeeHouseRules;
+  spades?: SpadesHouseRules;
+  euchre?: EuchreHouseRules;
 }): void {
   try {
-    localStorage.setItem(ACTIVE_RULES_KEY, JSON.stringify(rules));
+    const current = loadActiveHouseRules();
+    localStorage.setItem(
+      ACTIVE_RULES_KEY,
+      JSON.stringify({
+        farkle: rules.farkle || current.farkle,
+        yahtzee: rules.yahtzee || current.yahtzee,
+        spades: rules.spades || current.spades,
+        euchre: rules.euchre || current.euchre,
+      })
+    );
   } catch (err) {
     console.error('Error saving active house rules', err);
   }
@@ -195,7 +277,9 @@ export function createCustomPreset(
   name: string,
   description: string,
   farkle: FarkleHouseRules,
-  yahtzee: YahtzeeHouseRules
+  yahtzee: YahtzeeHouseRules,
+  spades: SpadesHouseRules = DEFAULT_SPADES_RULES,
+  euchre: EuchreHouseRules = DEFAULT_EUCHRE_RULES
 ): HouseRulesPreset {
   const newPreset: HouseRulesPreset = {
     id: `custom_preset_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -205,13 +289,15 @@ export function createCustomPreset(
     createdAt: new Date().toISOString(),
     farkle: { ...farkle },
     yahtzee: { ...yahtzee },
+    spades: { ...spades },
+    euchre: { ...euchre },
   };
 
   const allPresets = loadHouseRulesPresets();
   const updated = [...allPresets, newPreset];
   saveHouseRulesPresets(updated);
   saveActivePresetId(newPreset.id);
-  saveActiveHouseRules({ farkle, yahtzee });
+  saveActiveHouseRules({ farkle, yahtzee, spades, euchre });
 
   return newPreset;
 }
@@ -228,6 +314,8 @@ export function updateCustomPreset(
         ...updates,
         farkle: updates.farkle ? { ...p.farkle, ...updates.farkle } : p.farkle,
         yahtzee: updates.yahtzee ? { ...p.yahtzee, ...updates.yahtzee } : p.yahtzee,
+        spades: updates.spades ? { ...(p.spades || DEFAULT_SPADES_RULES), ...updates.spades } : p.spades,
+        euchre: updates.euchre ? { ...(p.euchre || DEFAULT_EUCHRE_RULES), ...updates.euchre } : p.euchre,
       };
     }
     return p;
@@ -241,14 +329,16 @@ export function deleteCustomPreset(id: string): HouseRulesPreset[] {
   const filtered = allPresets.filter((p) => p.id !== id || p.isBuiltIn);
   saveHouseRulesPresets(filtered);
 
-  // If the deleted preset was active, switch to standard
   if (loadActivePresetId() === id) {
     saveActivePresetId('preset_standard');
     saveActiveHouseRules({
       farkle: { ...DEFAULT_FARKLE_RULES },
       yahtzee: { ...DEFAULT_YAHTZEE_RULES },
+      spades: { ...DEFAULT_SPADES_RULES },
+      euchre: { ...DEFAULT_EUCHRE_RULES },
     });
   }
 
   return filtered;
 }
+

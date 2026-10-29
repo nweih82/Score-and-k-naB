@@ -76,7 +76,9 @@
           "enum": [
             "farkle",
             "yahtzee",
-            "dominoes"
+            "dominoes",
+            "spades",
+            "euchre"
           ]
         },
         "winner": {
@@ -114,7 +116,9 @@
           "enum": [
             "farkle",
             "yahtzee",
-            "dominoes"
+            "dominoes",
+            "spades",
+            "euchre"
           ]
         },
         "userId": {
@@ -145,7 +149,9 @@
           "enum": [
             "farkle",
             "yahtzee",
-            "dominoes"
+            "dominoes",
+            "spades",
+            "euchre"
           ]
         },
         "hostId": {
@@ -196,7 +202,9 @@
           "enum": [
             "farkle",
             "yahtzee",
-            "dominoes"
+            "dominoes",
+            "spades",
+            "euchre"
           ]
         },
         "date": {

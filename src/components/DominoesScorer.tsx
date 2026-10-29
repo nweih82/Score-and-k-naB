@@ -505,6 +505,7 @@ export default function DominoesScorer({
           <button
             onClick={startNewGame}
             disabled={selectedPlayers.length === 0}
+            data-tv-action="primary"
             className="w-full py-3.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:hover:bg-teal-600 text-white font-black rounded-full text-sm flex items-center justify-center gap-2 transition-colors shadow-md cursor-pointer uppercase tracking-wider"
           >
             <Play className="w-4 h-4 fill-current" />
@@ -550,6 +551,7 @@ export default function DominoesScorer({
                 <button
                   onClick={handleUndo}
                   disabled={historyStack.length === 0}
+                  data-tv-action="undo"
                   className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-30 disabled:hover:bg-amber-500 text-teal-950 font-black rounded-full text-[10px] flex items-center gap-1 transition-all cursor-pointer uppercase tracking-wider shadow-xs"
                   title="Undo last score entry"
                 >

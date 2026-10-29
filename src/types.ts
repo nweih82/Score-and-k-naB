@@ -1,4 +1,4 @@
-export type GameType = 'farkle' | 'yahtzee' | 'dominoes';
+export type GameType = 'farkle' | 'yahtzee' | 'dominoes' | 'spades' | 'euchre';
 
 export interface Player {
   id: string;
@@ -11,7 +11,7 @@ export interface GameHistoryEntry {
   id: string;
   gameType: GameType;
   players: Player[];
-  winner: string; // Player name
+  winner: string; // Player or Team name
   date: string;
   scores: Record<string, number>; // player.id -> finalScore
 }
@@ -67,6 +67,34 @@ export interface YahtzeeHouseRules {
   jokerRule: 'standard' | 'free_choice' | 'strict_bonus_only';
 }
 
+// SPADES HOUSE RULES & SETTINGS
+export type SpadesGameMode = 'partnership' | 'cutthroat';
+export type SpadesNilType = 'none' | 'nil' | 'blind_nil';
+
+export interface SpadesHouseRules {
+  targetScore: number; // 500 default (or 250, 300, 750, 1000)
+  gameMode: SpadesGameMode; // 'partnership' (2v2) or 'cutthroat' (individual)
+  includeJokers: boolean; // High & Low Jokers (Big Joker & Little Joker)
+  nilBonus: number; // 100 default (or 50, 150)
+  blindNilBonus: number; // 200 default (0 to disable)
+  bagPenalty: number; // 100 default (-100 per 10 bags, 0 to disable)
+  bagThreshold: number; // 10 default
+  minBid: number; // 4 default for teams, 1 for cutthroat
+}
+
+// EUCHRE HOUSE RULES & SETTINGS
+export type EuchreGameMode = 'partnership' | 'cutthroat';
+export type CardSuit = 'spades' | 'hearts' | 'diamonds' | 'clubs';
+
+export interface EuchreHouseRules {
+  targetScore: number; // 10 default (or 5, 7, 11, 15)
+  gameMode: EuchreGameMode; // 'partnership' (2v2) or 'cutthroat' (3/4-player solo maker vs defenders)
+  aloneMarchPoints: number; // 4 default (or 3 in cutthroat)
+  euchrePoints: number; // 2 default
+  stickTheDealer: boolean; // true default
+  bennyJoker: boolean; // false default (High Joker / Benny as top trump)
+}
+
 // HOUSE RULES PRESET
 export interface HouseRulesPreset {
   id: string;
@@ -76,6 +104,8 @@ export interface HouseRulesPreset {
   createdAt?: string;
   farkle: FarkleHouseRules;
   yahtzee: YahtzeeHouseRules;
+  spades?: SpadesHouseRules;
+  euchre?: EuchreHouseRules;
 }
 
 // FARKLE TYPES
@@ -162,9 +192,90 @@ export interface DominoesState {
   activePlayerId: string;
 }
 
+// SPADES TYPES
+export interface SpadesBidEntry {
+  bid: number;
+  nilType: SpadesNilType;
+  tricksWon: number;
+  partnerNilType?: SpadesNilType;
+  partnerNilSuccess?: boolean | null;
+}
+
+export interface SpadesRound {
+  roundNumber: number;
+  dealerId?: string;
+  entries: Record<string, SpadesBidEntry>;
+  roundDeltas: Record<string, number>;
+  bagsAdded: Record<string, number>;
+  bagPenalties: Record<string, number>;
+}
+
+export interface SpadesTeam {
+  id: string;
+  name: string;
+  color: string;
+  avatar: string;
+  memberIds: string[];
+  memberNames: string[];
+}
+
+export interface SpadesState {
+  players: Player[];
+  teams?: SpadesTeam[];
+  gameMode: SpadesGameMode;
+  includeJokers: boolean;
+  totalTricksPerHand: number;
+  scores: Record<string, number>;
+  bags: Record<string, number>;
+  totalBagsLifetime?: Record<string, number>;
+  rounds: SpadesRound[];
+  currentRound: number;
+  dealerIndex: number;
+  targetScore: number;
+  winnerId: string | null;
+  activePlayerId: string;
+  rules: SpadesHouseRules;
+}
+
+// EUCHRE TYPES
+export interface EuchreTeam {
+  id: string;
+  name: string;
+  color: string;
+  avatar: string;
+  memberIds: string[];
+  memberNames: string[];
+}
+
+export interface EuchreRound {
+  handNumber: number;
+  dealerId: string;
+  trumpSuit: CardSuit;
+  makerId: string;
+  wentAlone: boolean;
+  tricksWonByMaker: number;
+  isEuchred: boolean;
+  roundDeltas: Record<string, number>;
+  summary: string;
+}
+
+export interface EuchreState {
+  players: Player[];
+  teams?: EuchreTeam[];
+  gameMode: EuchreGameMode;
+  scores: Record<string, number>;
+  rounds: EuchreRound[];
+  currentHand: number;
+  dealerIndex: number;
+  targetScore: number;
+  winnerId: string | null;
+  activePlayerId: string;
+  rules: EuchreHouseRules;
+}
+
 export interface SavedGameData {
   gameType: GameType;
-  gameState: FarkleState | YahtzeeState | DominoesState;
+  gameState: FarkleState | YahtzeeState | DominoesState | SpadesState | EuchreState;
   turnScore?: number;
   updatedAt: string;
 }
@@ -181,7 +292,7 @@ export interface ConnectedPlayer {
 export interface GameRoomData {
   code: string;
   gameType: GameType;
-  gameState: FarkleState | YahtzeeState | DominoesState;
+  gameState: FarkleState | YahtzeeState | DominoesState | SpadesState | EuchreState;
   turnScore?: number | null;
   hostId: string;
   hostName: string;
@@ -189,3 +300,4 @@ export interface GameRoomData {
   connectedPlayers: ConnectedPlayer[];
   updatedAt: string;
 }
+

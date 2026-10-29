@@ -103,6 +103,10 @@ export const HallOfFame: React.FC<HallOfFameProps> = ({ gameHistory, globalRecor
         return { name: 'Yahtzee', icon: <Sparkles className="w-3.5 h-3.5 text-teal-400" />, bg: 'bg-teal-500/10 border-teal-500/30 text-teal-600 dark:text-teal-400' };
       case 'dominoes':
         return { name: 'Dominoes', icon: <Dices className="w-3.5 h-3.5 text-pink-400" />, bg: 'bg-pink-500/10 border-pink-500/30 text-pink-600 dark:text-pink-400' };
+      case 'spades':
+        return { name: 'Spades', icon: <span className="text-xs leading-none">♠</span>, bg: 'bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400' };
+      case 'euchre':
+        return { name: 'Euchre', icon: <span className="text-xs leading-none">♣</span>, bg: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400' };
     }
   };
 
@@ -174,6 +178,28 @@ export const HallOfFame: React.FC<HallOfFameProps> = ({ gameHistory, globalRecor
           >
             <Dices className="w-3.5 h-3.5" />
             Dominoes
+          </button>
+          <button
+            onClick={() => setFilterGame('spades')}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
+              filterGame === 'spades'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <span>♠</span>
+            Spades
+          </button>
+          <button
+            onClick={() => setFilterGame('euchre')}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
+              filterGame === 'euchre'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <span>♣</span>
+            Euchre
           </button>
         </div>
       </div>

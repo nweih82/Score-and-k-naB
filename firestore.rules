@@ -50,7 +50,7 @@ service cloud.firestore {
     function isValidGameHistory(data, userId) {
       return data.keys().hasAll(['id', 'gameType', 'winner', 'date', 'userId', 'createdAt'])
         && data.id is string && data.id.size() <= 64
-        && (data.gameType == 'farkle' || data.gameType == 'yahtzee' || data.gameType == 'dominoes')
+        && (data.gameType == 'farkle' || data.gameType == 'yahtzee' || data.gameType == 'dominoes' || data.gameType == 'spades' || data.gameType == 'euchre')
         && data.winner is string && data.winner.size() <= 100
         && data.date is string && data.date.size() <= 100
         && data.userId == userId
@@ -59,7 +59,7 @@ service cloud.firestore {
 
     function isValidSavedGame(data, userId) {
       return data.keys().hasAll(['gameType', 'userId', 'updatedAt'])
-        && (data.gameType == 'farkle' || data.gameType == 'yahtzee' || data.gameType == 'dominoes')
+        && (data.gameType == 'farkle' || data.gameType == 'yahtzee' || data.gameType == 'dominoes' || data.gameType == 'spades' || data.gameType == 'euchre')
         && data.userId == userId
         && data.updatedAt is string;
     }
@@ -67,7 +67,7 @@ service cloud.firestore {
     function isValidGameRoom(data) {
       return data.keys().hasAll(['code', 'gameType', 'hostId', 'updatedAt'])
         && data.code is string && data.code.size() <= 20
-        && (data.gameType == 'farkle' || data.gameType == 'yahtzee' || data.gameType == 'dominoes')
+        && (data.gameType == 'farkle' || data.gameType == 'yahtzee' || data.gameType == 'dominoes' || data.gameType == 'spades' || data.gameType == 'euchre')
         && data.hostId is string && data.hostId.size() <= 128
         && (data.hostName == null || (data.hostName is string && data.hostName.size() <= 100))
         && (data.lastActionBy == null || (data.lastActionBy is string && data.lastActionBy.size() <= 100))
@@ -79,7 +79,7 @@ service cloud.firestore {
         && data.id is string && data.id.size() <= 128
         && data.playerName is string && data.playerName.size() <= 100
         && data.score is number
-        && (data.gameType == 'farkle' || data.gameType == 'yahtzee' || data.gameType == 'dominoes')
+        && (data.gameType == 'farkle' || data.gameType == 'yahtzee' || data.gameType == 'dominoes' || data.gameType == 'spades' || data.gameType == 'euchre')
         && data.date is string && data.date.size() <= 100;
     }
 
@@ -124,12 +124,12 @@ service cloud.firestore {
       // User Saved Games Subcollection
       match /savedGames/{gameType} {
         allow get, list: if isOwner(userId);
-        allow create: if isOwner(userId) && (gameType == 'farkle' || gameType == 'yahtzee' || gameType == 'dominoes')
+        allow create: if isOwner(userId) && (gameType == 'farkle' || gameType == 'yahtzee' || gameType == 'dominoes' || gameType == 'spades' || gameType == 'euchre')
           && isValidSavedGame(incoming(), userId);
-        allow update: if isOwner(userId) && (gameType == 'farkle' || gameType == 'yahtzee' || gameType == 'dominoes')
+        allow update: if isOwner(userId) && (gameType == 'farkle' || gameType == 'yahtzee' || gameType == 'dominoes' || gameType == 'spades' || gameType == 'euchre')
           && isValidSavedGame(incoming(), userId)
           && incoming().userId == existing().userId;
-        allow delete: if isOwner(userId) && (gameType == 'farkle' || gameType == 'yahtzee' || gameType == 'dominoes');
+        allow delete: if isOwner(userId) && (gameType == 'farkle' || gameType == 'yahtzee' || gameType == 'dominoes' || gameType == 'spades' || gameType == 'euchre');
       }
     }
   }

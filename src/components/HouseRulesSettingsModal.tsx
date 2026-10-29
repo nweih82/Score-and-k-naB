@@ -2,11 +2,15 @@ import React, { useState, useEffect } from 'react';
 import {
   FarkleHouseRules,
   YahtzeeHouseRules,
+  SpadesHouseRules,
+  EuchreHouseRules,
   HouseRulesPreset,
 } from '../types';
 import {
   DEFAULT_FARKLE_RULES,
   DEFAULT_YAHTZEE_RULES,
+  DEFAULT_SPADES_RULES,
+  DEFAULT_EUCHRE_RULES,
   loadHouseRulesPresets,
   loadActivePresetId,
   saveActivePresetId,
@@ -39,10 +43,15 @@ import { motion, AnimatePresence } from 'motion/react';
 export interface HouseRulesSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onApplyRules?: (rules: { farkle: FarkleHouseRules; yahtzee: YahtzeeHouseRules }) => void;
+  onApplyRules?: (rules: {
+    farkle: FarkleHouseRules;
+    yahtzee: YahtzeeHouseRules;
+    spades: SpadesHouseRules;
+    euchre: EuchreHouseRules;
+  }) => void;
   onRulesUpdated?: () => void;
-  activeGameType?: 'farkle' | 'yahtzee' | null;
-  initialTab?: 'farkle' | 'yahtzee' | 'presets';
+  activeGameType?: 'farkle' | 'yahtzee' | 'spades' | 'euchre' | null;
+  initialTab?: 'farkle' | 'yahtzee' | 'spades' | 'euchre' | 'presets';
 }
 
 export function HouseRulesSettingsModal({
@@ -53,8 +62,8 @@ export function HouseRulesSettingsModal({
   activeGameType,
   initialTab,
 }: HouseRulesSettingsModalProps) {
-  const [activeTab, setActiveTab] = useState<'farkle' | 'yahtzee' | 'presets'>(
-    initialTab || (activeGameType === 'yahtzee' ? 'yahtzee' : 'farkle')
+  const [activeTab, setActiveTab] = useState<'farkle' | 'yahtzee' | 'spades' | 'euchre' | 'presets'>(
+    initialTab || (activeGameType === 'yahtzee' ? 'yahtzee' : activeGameType === 'spades' ? 'spades' : activeGameType === 'euchre' ? 'euchre' : 'farkle')
   );
 
   const [presets, setPresets] = useState<HouseRulesPreset[]>([]);
@@ -62,6 +71,8 @@ export function HouseRulesSettingsModal({
 
   const [farkleRules, setFarkleRules] = useState<FarkleHouseRules>(DEFAULT_FARKLE_RULES);
   const [yahtzeeRules, setYahtzeeRules] = useState<YahtzeeHouseRules>(DEFAULT_YAHTZEE_RULES);
+  const [spadesRules, setSpadesRules] = useState<SpadesHouseRules>(DEFAULT_SPADES_RULES);
+  const [euchreRules, setEuchreRules] = useState<EuchreHouseRules>(DEFAULT_EUCHRE_RULES);
 
   // New Preset Modal state
   const [isCreatingPreset, setIsCreatingPreset] = useState(false);
@@ -84,11 +95,17 @@ export function HouseRulesSettingsModal({
       setActivePresetId(currentPresetId);
       setFarkleRules(currentRules.farkle);
       setYahtzeeRules(currentRules.yahtzee);
+      setSpadesRules(currentRules.spades || DEFAULT_SPADES_RULES);
+      setEuchreRules(currentRules.euchre || DEFAULT_EUCHRE_RULES);
 
       if (initialTab) {
         setActiveTab(initialTab);
       } else if (activeGameType === 'yahtzee') {
         setActiveTab('yahtzee');
+      } else if (activeGameType === 'spades') {
+        setActiveTab('spades');
+      } else if (activeGameType === 'euchre') {
+        setActiveTab('euchre');
       } else if (activeGameType === 'farkle') {
         setActiveTab('farkle');
       }
@@ -103,8 +120,15 @@ export function HouseRulesSettingsModal({
     setActivePresetId(preset.id);
     setFarkleRules({ ...preset.farkle });
     setYahtzeeRules({ ...preset.yahtzee });
+    setSpadesRules({ ...DEFAULT_SPADES_RULES, ...(preset.spades || {}) });
+    setEuchreRules({ ...DEFAULT_EUCHRE_RULES, ...(preset.euchre || {}) });
     saveActivePresetId(preset.id);
-    saveActiveHouseRules({ farkle: preset.farkle, yahtzee: preset.yahtzee });
+    saveActiveHouseRules({
+      farkle: preset.farkle,
+      yahtzee: preset.yahtzee,
+      spades: { ...DEFAULT_SPADES_RULES, ...(preset.spades || {}) },
+      euchre: { ...DEFAULT_EUCHRE_RULES, ...(preset.euchre || {}) },
+    });
     showToast(`Loaded preset "${preset.name}"`);
     if (onRulesUpdated) onRulesUpdated();
   };
@@ -117,7 +141,9 @@ export function HouseRulesSettingsModal({
       newPresetName,
       newPresetDescription,
       farkleRules,
-      yahtzeeRules
+      yahtzeeRules,
+      spadesRules,
+      euchreRules
     );
 
     const updatedPresets = loadHouseRulesPresets();
@@ -135,9 +161,16 @@ export function HouseRulesSettingsModal({
     const updated = updateCustomPreset(currentPreset.id, {
       farkle: farkleRules,
       yahtzee: yahtzeeRules,
+      spades: spadesRules,
+      euchre: euchreRules,
     });
     setPresets(updated);
-    saveActiveHouseRules({ farkle: farkleRules, yahtzee: yahtzeeRules });
+    saveActiveHouseRules({
+      farkle: farkleRules,
+      yahtzee: yahtzeeRules,
+      spades: spadesRules,
+      euchre: euchreRules,
+    });
     showToast(`Updated preset "${currentPreset.name}"`);
     if (onRulesUpdated) onRulesUpdated();
   };
@@ -150,6 +183,8 @@ export function HouseRulesSettingsModal({
     const reloaded = loadActiveHouseRules();
     setFarkleRules(reloaded.farkle);
     setYahtzeeRules(reloaded.yahtzee);
+    setSpadesRules(reloaded.spades);
+    setEuchreRules(reloaded.euchre);
     showToast('Custom preset deleted');
     if (onRulesUpdated) onRulesUpdated();
   };
@@ -157,21 +192,35 @@ export function HouseRulesSettingsModal({
   const handleResetToStandard = () => {
     setFarkleRules({ ...DEFAULT_FARKLE_RULES });
     setYahtzeeRules({ ...DEFAULT_YAHTZEE_RULES });
+    setSpadesRules({ ...DEFAULT_SPADES_RULES });
+    setEuchreRules({ ...DEFAULT_EUCHRE_RULES });
     setActivePresetId('preset_standard');
     saveActivePresetId('preset_standard');
     saveActiveHouseRules({
       farkle: { ...DEFAULT_FARKLE_RULES },
       yahtzee: { ...DEFAULT_YAHTZEE_RULES },
+      spades: { ...DEFAULT_SPADES_RULES },
+      euchre: { ...DEFAULT_EUCHRE_RULES },
     });
     showToast('Reset to Official Standard rules');
     if (onRulesUpdated) onRulesUpdated();
   };
 
   const handleApplyAndClose = () => {
-    saveActiveHouseRules({ farkle: farkleRules, yahtzee: yahtzeeRules });
+    saveActiveHouseRules({
+      farkle: farkleRules,
+      yahtzee: yahtzeeRules,
+      spades: spadesRules,
+      euchre: euchreRules,
+    });
     saveActivePresetId(activePresetId);
     if (onApplyRules) {
-      onApplyRules({ farkle: farkleRules, yahtzee: yahtzeeRules });
+      onApplyRules({
+        farkle: farkleRules,
+        yahtzee: yahtzeeRules,
+        spades: spadesRules,
+        euchre: euchreRules,
+      });
     }
     if (onRulesUpdated) {
       onRulesUpdated();
@@ -362,44 +411,70 @@ export function HouseRulesSettingsModal({
           )}
 
           {/* NAVIGATION TABS */}
-          <div className="flex border-b border-slate-200 dark:border-slate-800 mb-5 gap-2">
+          <div className="flex flex-wrap border-b border-slate-200 dark:border-slate-800 mb-5 gap-1 sm:gap-2">
             <button
               type="button"
               onClick={() => setActiveTab('farkle')}
-              className={`pb-2.5 px-4 text-xs font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+              className={`pb-2.5 px-3 sm:px-4 text-xs font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'farkle'
                   ? 'border-orange-500 text-orange-600 dark:text-orange-400'
                   : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
               }`}
             >
               <Flame className="w-4 h-4 fill-current" />
-              Farkle House Rules
+              Farkle
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('yahtzee')}
-              className={`pb-2.5 px-4 text-xs font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+              className={`pb-2.5 px-3 sm:px-4 text-xs font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'yahtzee'
                   ? 'border-teal-500 text-teal-600 dark:text-teal-400'
                   : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
               }`}
             >
               <Sparkles className="w-4 h-4 fill-current" />
-              Yahtzee House Rules
+              Yahtzee
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('spades')}
+              className={`pb-2.5 px-3 sm:px-4 text-xs font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'spades'
+                  ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+              }`}
+            >
+              <span>♠</span>
+              Spades
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('euchre')}
+              className={`pb-2.5 px-3 sm:px-4 text-xs font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'euchre'
+                  ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+              }`}
+            >
+              <span>♣</span>
+              Euchre
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('presets')}
-              className={`pb-2.5 px-4 text-xs font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
+              className={`pb-2.5 px-3 sm:px-4 text-xs font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'presets'
                   ? 'border-amber-500 text-amber-600 dark:text-amber-400'
                   : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
               }`}
             >
               <Bookmark className="w-4 h-4" />
-              Manage Presets
+              Presets
             </button>
           </div>
 
@@ -1019,6 +1094,294 @@ export function HouseRulesSettingsModal({
                         </div>
                       </div>
                     </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SPADES RULES TAB */}
+            {activeTab === 'spades' && (
+              <div className="space-y-5">
+                {/* 1. Default Mode & High/Low Jokers */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-4 bg-white dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                      ♠ Default Spades Game Mode
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Choose between 2v2 Partnership teams or Cutthroat individual play.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      {(['partnership', 'cutthroat'] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() =>
+                            setSpadesRules((prev) => ({ ...prev, gameMode: mode }))
+                          }
+                          className={`py-2 px-3 rounded-xl text-xs font-black uppercase tracking-wider border cursor-pointer ${
+                            spadesRules.gameMode === mode
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                          }`}
+                        >
+                          {mode === 'partnership' ? 'Partnership 2v2' : 'Cutthroat Solo'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-white dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                        🃏 Play with High &amp; Low Jokers
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Includes Big Joker &amp; Little Joker as the highest Spades trumps above 2♠ and A♠.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSpadesRules((prev) => ({
+                          ...prev,
+                          includeJokers: !prev.includeJokers,
+                        }))
+                      }
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                        spadesRules.includeJokers ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                          spadesRules.includeJokers ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Target Score & Bag Penalty */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-4 bg-white dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                      Target Score to Win
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {[250, 300, 500, 750, 1000].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() =>
+                            setSpadesRules((prev) => ({ ...prev, targetScore: val }))
+                          }
+                          className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-black font-mono cursor-pointer ${
+                            spadesRules.targetScore === val
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {val}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-white dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                      10-Sandbag Rollover Penalty
+                    </h4>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { val: 100, label: '-100 pts (Standard)' },
+                        { val: 50, label: '-50 pts (Light)' },
+                        { val: 0, label: 'No Penalty (Off)' },
+                      ].map((opt) => (
+                        <button
+                          key={opt.val}
+                          type="button"
+                          onClick={() =>
+                            setSpadesRules((prev) => ({ ...prev, bagPenalty: opt.val }))
+                          }
+                          className={`py-2 px-2 rounded-xl text-xs font-black cursor-pointer ${
+                            spadesRules.bagPenalty === opt.val
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Nil & Blind Nil Bonus */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-4 bg-white dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                      Nil Bid Bonus / Penalty
+                    </h4>
+                    <div className="flex gap-2">
+                      {[50, 100, 150].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() =>
+                            setSpadesRules((prev) => ({ ...prev, nilBonus: val }))
+                          }
+                          className={`flex-1 py-1.5 rounded-xl text-xs font-black font-mono cursor-pointer ${
+                            spadesRules.nilBonus === val
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          ±{val} pts
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-white dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                      Blind Nil Bonus / Penalty
+                    </h4>
+                    <div className="flex gap-2">
+                      {[100, 200, 0].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() =>
+                            setSpadesRules((prev) => ({ ...prev, blindNilBonus: val }))
+                          }
+                          className={`flex-1 py-1.5 rounded-xl text-xs font-black font-mono cursor-pointer ${
+                            spadesRules.blindNilBonus === val
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {val === 0 ? 'Disabled' : `±${val} pts`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* EUCHRE RULES TAB */}
+            {activeTab === 'euchre' && (
+              <div className="space-y-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-4 bg-white dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                      ♣ Default Euchre Mode
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Choose between 2v2 Partnership teams or Cutthroat (1 Maker vs Defenders).
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      {(['partnership', 'cutthroat'] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() =>
+                            setEuchreRules((prev) => ({ ...prev, gameMode: mode }))
+                          }
+                          className={`py-2 px-3 rounded-xl text-xs font-black uppercase tracking-wider border cursor-pointer ${
+                            euchreRules.gameMode === mode
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                          }`}
+                        >
+                          {mode === 'partnership' ? 'Partnership 2v2' : 'Cutthroat Solo'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-white dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                      Target Points to Win
+                    </h4>
+                    <div className="flex gap-2 pt-1">
+                      {[5, 7, 10, 11, 15].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() =>
+                            setEuchreRules((prev) => ({ ...prev, targetScore: val }))
+                          }
+                          className={`flex-1 py-2 rounded-xl text-xs font-black font-mono cursor-pointer ${
+                            euchreRules.targetScore === val
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {val}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-4 bg-white dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                        Stick the Dealer
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Dealer is forced to name trump if all players pass twice.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEuchreRules((prev) => ({
+                          ...prev,
+                          stickTheDealer: !prev.stickTheDealer,
+                        }))
+                      }
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                        euchreRules.stickTheDealer ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                          euchreRules.stickTheDealer ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="p-4 bg-white dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                        🃏 Play with Benny (High Joker)
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Adds a Joker as the highest trump card above the Right Bower.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEuchreRules((prev) => ({
+                          ...prev,
+                          bennyJoker: !prev.bennyJoker,
+                        }))
+                      }
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                        euchreRules.bennyJoker ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                          euchreRules.bennyJoker ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
                   </div>
                 </div>
               </div>

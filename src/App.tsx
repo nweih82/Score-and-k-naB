@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Player, GameType, GameHistoryEntry, SavedGameData, FarkleState, YahtzeeState, DominoesState, YahtzeePlayerScore } from './types';
+import { Player, GameType, GameHistoryEntry, SavedGameData, FarkleState, YahtzeeState, DominoesState, SpadesState, EuchreState, YahtzeePlayerScore } from './types';
 import { safeJsonStringify } from './lib/utils';
 
 function getYahtzeePlayerTotal(sheet: YahtzeePlayerScore): number {
@@ -111,11 +111,57 @@ function getDominoesProgress(savedGame?: SavedGameData | null) {
     percent: isNaN(percent) ? 0 : percent,
   };
 }
+
+function getSpadesProgress(savedGame?: SavedGameData | null) {
+  if (!savedGame || !savedGame.gameState) return null;
+  const state = savedGame.gameState as SpadesState;
+  const target = Math.max(50, Number(state.targetScore) || 500);
+  const scores = state.scores || {};
+  const numericScores = Object.values(scores).map(v => Number(v)).filter(v => !isNaN(v));
+  const maxScore = numericScores.length > 0 ? Math.max(...numericScores, 0) : 0;
+  const percent = target > 0 ? Math.min(100, Math.max(0, Math.round((maxScore / target) * 100))) : 0;
+
+  const leaderId = Object.keys(scores).find(id => Number(scores[id]) === maxScore);
+  const leader = state.players?.find(p => p.id === leaderId);
+
+  return {
+    leaderName: leader ? `${leader.avatar || '♠'} ${leader.name}` : 'Leader',
+    maxScore: isNaN(maxScore) ? 0 : maxScore,
+    target: isNaN(target) ? 500 : target,
+    percent: isNaN(percent) ? 0 : percent,
+    gameMode: state.gameMode || 'partnership',
+    includeJokers: !!state.includeJokers,
+  };
+}
+
+function getEuchreProgress(savedGame?: SavedGameData | null) {
+  if (!savedGame || !savedGame.gameState) return null;
+  const state = savedGame.gameState as EuchreState;
+  const target = Math.max(3, Number(state.targetScore) || 10);
+  const scores = state.scores || {};
+  const numericScores = Object.values(scores).map(v => Number(v)).filter(v => !isNaN(v));
+  const maxScore = numericScores.length > 0 ? Math.max(...numericScores, 0) : 0;
+  const percent = target > 0 ? Math.min(100, Math.max(0, Math.round((maxScore / target) * 100))) : 0;
+
+  const leaderId = Object.keys(scores).find(id => Number(scores[id]) === maxScore);
+  const leader = state.players?.find(p => p.id === leaderId);
+
+  return {
+    leaderName: leader ? `${leader.avatar || '♣'} ${leader.name}` : 'Leader',
+    maxScore: isNaN(maxScore) ? 0 : maxScore,
+    target: isNaN(target) ? 10 : target,
+    percent: isNaN(percent) ? 0 : percent,
+    gameMode: state.gameMode || 'partnership',
+  };
+}
+
 import PlayerManager from './components/PlayerManager';
 import FarkleScorer from './components/FarkleScorer';
 import FarkleGuide from './components/FarkleGuide';
 import YahtzeeScorer from './components/YahtzeeScorer';
 import DominoesScorer from './components/DominoesScorer';
+import SpadesScorer from './components/SpadesScorer';
+import EuchreScorer from './components/EuchreScorer';
 import PlayerStatistics from './components/PlayerStatistics';
 import { HallOfFame } from './components/HallOfFame';
 import ThemeSelectorModal from './components/ThemeSelectorModal';
@@ -126,7 +172,7 @@ import { AuthModal } from './components/AuthModal';
 import { HouseRulesSettingsModal } from './components/HouseRulesSettingsModal';
 import { loadActiveHouseRules } from './lib/houseRules';
 import { COLOR_THEMES } from './theme';
-import { FarkleLogo, YahtzeeLogo, DominoesLogo, BankAndScoreLogo, BankAndScoreHorizontalLogo } from './components/GameLogos';
+import { FarkleLogo, YahtzeeLogo, DominoesLogo, SpadesLogo, EuchreLogo, BankAndScoreLogo, BankAndScoreHorizontalLogo } from './components/GameLogos';
 import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, Flame, Sparkles, HelpCircle, History, RefreshCw, X, Check, Gamepad2, Users, ScrollText, BarChart3, Save, BookmarkCheck, Play, Trash2, Clock, Sun, Moon, Palette, LogIn, LogOut, Cloud, CloudOff, Volume2, VolumeX, Tv, Wifi, Crown, Maximize2, Minimize2, Sliders } from 'lucide-react';
 import { useSound } from './lib/SoundContext';
@@ -201,7 +247,7 @@ export default function App() {
 
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [showHouseRulesModal, setShowHouseRulesModal] = useState(false);
-  const [houseRulesTab, setHouseRulesTab] = useState<'farkle' | 'yahtzee'>('farkle');
+  const [houseRulesTab, setHouseRulesTab] = useState<'farkle' | 'yahtzee' | 'spades' | 'euchre'>('farkle');
   const [activeHouseRules, setActiveHouseRules] = useState(() => loadActiveHouseRules());
 
   const handleHouseRulesUpdated = () => {
@@ -282,10 +328,15 @@ export default function App() {
     if (!saved) return DEFAULT_PLAYERS;
     try {
       const parsed: Player[] = JSON.parse(saved);
-      return parsed.map((p, idx) => ({
-        ...p,
-        avatar: p.avatar || (idx === 0 ? '🍁' : idx === 1 ? '🌿' : '🎲'),
-      }));
+      if (!Array.isArray(parsed)) return DEFAULT_PLAYERS;
+      const valid = parsed
+        .filter((p): p is Player => Boolean(p && typeof p === 'object' && p.id && p.name))
+        .map((p, idx) => ({
+          ...p,
+          color: p.color || 'bg-emerald-500 text-white',
+          avatar: p.avatar || (idx === 0 ? '🍁' : idx === 1 ? '🌿' : '🎲'),
+        }));
+      return valid.length > 0 ? valid : DEFAULT_PLAYERS;
     } catch {
       return DEFAULT_PLAYERS;
     }
@@ -300,11 +351,15 @@ export default function App() {
     try {
       const parsed = JSON.parse(saved);
       if (!Array.isArray(parsed)) return [];
-      return parsed.map((entry: any) => ({
-        ...entry,
-        players: Array.isArray(entry.players) ? entry.players : [],
-        scores: entry.scores || {},
-      }));
+      return parsed
+        .filter((entry: any) => Boolean(entry && typeof entry === 'object' && entry.id))
+        .map((entry: any) => ({
+          ...entry,
+          players: Array.isArray(entry.players)
+            ? entry.players.filter((p: any) => Boolean(p && typeof p === 'object' && p.id && p.name))
+            : [],
+          scores: entry.scores || {},
+        }));
     } catch {
       return [];
     }
@@ -334,6 +389,8 @@ export default function App() {
     farkle?: SavedGameData | null;
     yahtzee?: SavedGameData | null;
     dominoes?: SavedGameData | null;
+    spades?: SavedGameData | null;
+    euchre?: SavedGameData | null;
   }>({});
 
   // Device & Online Room Multiplayer State
@@ -450,11 +507,15 @@ export default function App() {
 
     // 2. Subscribe to Game History
     const unsubHistory = subscribeToGameHistory(currentUser.uid, fsHistory => {
-      const sanitized = (fsHistory || []).map((entry: any) => ({
-        ...entry,
-        players: Array.isArray(entry.players) ? entry.players : [],
-        scores: entry.scores || {},
-      }));
+      const sanitized = (fsHistory || [])
+        .filter((entry: any) => Boolean(entry && typeof entry === 'object' && entry.id))
+        .map((entry: any) => ({
+          ...entry,
+          players: Array.isArray(entry.players)
+            ? entry.players.filter((p: any) => Boolean(p && typeof p === 'object' && p.id && p.name))
+            : [],
+          scores: entry.scores || {},
+        }));
       if (sanitized.length > 0) {
         setGameHistory(sanitized);
       } else if (gameHistory.length > 0) {
@@ -481,11 +542,15 @@ export default function App() {
       const farkleRaw = localStorage.getItem('scorekeeper_saved_farkle');
       const yahtzeeRaw = localStorage.getItem('scorekeeper_saved_yahtzee');
       const dominoesRaw = localStorage.getItem('scorekeeper_saved_dominoes');
+      const spadesRaw = localStorage.getItem('scorekeeper_saved_spades');
+      const euchreRaw = localStorage.getItem('scorekeeper_saved_euchre');
 
       setSavedGames({
         farkle: farkleRaw ? JSON.parse(farkleRaw) : null,
         yahtzee: yahtzeeRaw ? JSON.parse(yahtzeeRaw) : null,
         dominoes: dominoesRaw ? JSON.parse(dominoesRaw) : null,
+        spades: spadesRaw ? JSON.parse(spadesRaw) : null,
+        euchre: euchreRaw ? JSON.parse(euchreRaw) : null,
       });
     } catch (e) {
       console.error('Error parsing saved games:', e);
@@ -516,6 +581,10 @@ export default function App() {
   };
 
   const resumeMatch = (gameType: GameType) => {
+    const cloudSaved = savedGames[gameType];
+    if (cloudSaved && !localStorage.getItem(`scorekeeper_saved_${gameType}`)) {
+      localStorage.setItem(`scorekeeper_saved_${gameType}`, safeJsonStringify(cloudSaved));
+    }
     setActiveGame(gameType);
   };
 
@@ -631,13 +700,25 @@ export default function App() {
       {/* HEADER BAR */}
       <header className="bg-slate-900 border-b border-slate-800 py-3.5 px-4 sm:px-6 sticky top-0 z-30 shadow-xl">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => activeGame && setShowQuitConfirm(true)}>
+          <div
+            tabIndex={0}
+            role="button"
+            aria-label="Bank & Score Home Lobby"
+            onClick={() => activeGame && setShowQuitConfirm(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                if (activeGame) setShowQuitConfirm(true);
+              }
+            }}
+            className="flex items-center gap-3 cursor-pointer rounded-xl px-1"
+          >
             <div className="flex items-center">
               <BankAndScoreHorizontalLogo size="md" />
             </div>
             <div className="hidden md:block pl-2 border-l border-slate-700/80">
               <p className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest">
-                Farkle • Yahtzee • Dominoes
+                Farkle • Yahtzee • Dominoes • Spades • Euchre
               </p>
             </div>
           </div>
@@ -725,13 +806,18 @@ export default function App() {
               onClick={() => {
                 if (activeGame === 'yahtzee') {
                   setHouseRulesTab('yahtzee');
+                } else if (activeGame === 'spades') {
+                  setHouseRulesTab('spades');
+                } else if (activeGame === 'euchre') {
+                  setHouseRulesTab('euchre');
                 } else {
                   setHouseRulesTab('farkle');
                 }
                 setShowHouseRulesModal(true);
               }}
+              data-tv-action="rules"
               className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold text-xs rounded-full transition-all cursor-pointer border border-slate-700/80 shadow-sm"
-              title="Configure Game House Rules & Presets (Farkle & Yahtzee)"
+              title="Configure Game House Rules & Presets (Farkle, Yahtzee, Spades & Euchre)"
               aria-label="House Rules"
             >
               <Sliders className="w-3.5 h-3.5 text-orange-400" />
@@ -814,6 +900,7 @@ export default function App() {
             {activeGame && (
               <button
                 onClick={() => setShowQuitConfirm(true)}
+                data-tv-quit="true"
                 className="px-5 py-1.5 bg-yellow-400 hover:bg-yellow-300 text-orange-905 font-black text-xs sm:text-sm rounded-full transition-all cursor-pointer shadow-md"
               >
                 Quit Game
@@ -867,7 +954,7 @@ export default function App() {
                 </div>
 
                 {/* SAVED GAMES IN PROGRESS BANNER */}
-                {(savedGames.farkle || savedGames.yahtzee || savedGames.dominoes) && (
+                {(savedGames.farkle || savedGames.yahtzee || savedGames.dominoes || savedGames.spades || savedGames.euchre) && (
                   <motion.div
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -983,6 +1070,75 @@ export default function App() {
                             </button>
                             <button
                               onClick={() => discardSavedGame('dominoes')}
+                              className="p-2 text-red-300 hover:text-red-200 hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
+                              title="Discard saved match"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {savedGames.spades && (
+                        <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10 flex flex-col justify-between space-y-3">
+                          <div className="flex justify-between items-start">
+                            <div className="flex items-center gap-1.5 text-indigo-300 font-black uppercase text-xs">
+                              <span>♠</span>
+                              Spades
+                            </div>
+                            <span className="text-[10px] text-teal-200/70 font-mono flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {savedGames.spades.updatedAt ? new Date(savedGames.spades.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Saved'}
+                            </span>
+                          </div>
+                          <div className="text-xs text-teal-100/90 font-medium">
+                            Round {(savedGames.spades.gameState as any).currentRound || 1} • {(savedGames.spades.gameState as any).gameMode === 'cutthroat' ? 'Cutthroat' : 'Partnership'}
+                            {(savedGames.spades.gameState as any).includeJokers ? ' • Jokers' : ''}
+                          </div>
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              onClick={() => resumeMatch('spades')}
+                              className="flex-1 py-2 px-3 bg-emerald-500 hover:bg-emerald-400 text-teal-950 font-black text-xs rounded-xl uppercase tracking-wider cursor-pointer shadow-sm flex items-center justify-center gap-1.5 transition-colors"
+                            >
+                              <Play className="w-3.5 h-3.5 fill-current" />
+                              Resume
+                            </button>
+                            <button
+                              onClick={() => discardSavedGame('spades')}
+                              className="p-2 text-red-300 hover:text-red-200 hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
+                              title="Discard saved match"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {savedGames.euchre && (
+                        <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/10 flex flex-col justify-between space-y-3">
+                          <div className="flex justify-between items-start">
+                            <div className="flex items-center gap-1.5 text-emerald-300 font-black uppercase text-xs">
+                              <span>♣</span>
+                              Euchre
+                            </div>
+                            <span className="text-[10px] text-teal-200/70 font-mono flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {savedGames.euchre.updatedAt ? new Date(savedGames.euchre.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Saved'}
+                            </span>
+                          </div>
+                          <div className="text-xs text-teal-100/90 font-medium">
+                            Hand {(savedGames.euchre.gameState as any).currentHand || 1} • {(savedGames.euchre.gameState as any).gameMode === 'cutthroat' ? 'Cutthroat' : 'Partnership'}
+                          </div>
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              onClick={() => resumeMatch('euchre')}
+                              className="flex-1 py-2 px-3 bg-emerald-500 hover:bg-emerald-400 text-teal-950 font-black text-xs rounded-xl uppercase tracking-wider cursor-pointer shadow-sm flex items-center justify-center gap-1.5 transition-colors"
+                            >
+                              <Play className="w-3.5 h-3.5 fill-current" />
+                              Resume
+                            </button>
+                            <button
+                              onClick={() => discardSavedGame('euchre')}
                               className="p-2 text-red-300 hover:text-red-200 hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
                               title="Discard saved match"
                             >
@@ -1311,6 +1467,248 @@ export default function App() {
                       </div>
                     </div>
                   </motion.div>
+
+                  {/* SPADES CARD */}
+                  <motion.div variants={launcherCardVariants}>
+                    <div className="bg-white dark:bg-slate-900 border-2 border-indigo-100 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-500/50 p-6 rounded-[32px] shadow-sm text-left flex flex-col justify-between min-h-[300px] group transition-all hover:shadow-lg hover:ring-4 hover:ring-indigo-400/20 relative overflow-hidden">
+                      {savedGames.spades && (
+                        <span className="absolute top-4 right-4 bg-emerald-100 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 z-10">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          Saved Match
+                        </span>
+                      )}
+                      <div>
+                        <div className="h-20 flex items-center justify-start mb-2 group-hover:scale-105 transition-transform origin-left">
+                          <SpadesLogo size="md" />
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200/70 dark:border-indigo-800">
+                            Partnership &amp; Cutthroat
+                          </span>
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-200/70 dark:border-amber-800">
+                            🃏 High &amp; Low Jokers
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                          Track bids, Nil &amp; Blind Nil, overtrick bags, and 10-bag penalties. Supports 2v2 Partnership or Cutthroat with High &amp; Low Jokers.
+                        </p>
+                      </div>
+
+                      {(() => {
+                        const prog = getSpadesProgress(savedGames.spades);
+                        if (prog) {
+                          return (
+                            <div className="my-3 p-3 bg-indigo-50/80 dark:bg-slate-800/80 rounded-2xl border border-indigo-200/60 dark:border-slate-700/80 space-y-1.5 shadow-xs">
+                              <div className="flex items-center justify-between text-[11px] font-black text-indigo-950 dark:text-indigo-200">
+                                <span className="truncate max-w-[130px] flex items-center gap-1" title={prog.leaderName}>
+                                  <span>🏆</span>
+                                  <span className="truncate">{prog.leaderName}</span>
+                                </span>
+                                <span className="font-mono text-indigo-600 dark:text-indigo-400 font-extrabold">
+                                  {prog.maxScore} / {prog.target} pts
+                                </span>
+                              </div>
+                              <div className="w-full bg-indigo-200/60 dark:bg-slate-700 rounded-full h-2.5 overflow-hidden p-0.5">
+                                <motion.div
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${prog.percent}%` }}
+                                  transition={{ duration: 0.9, ease: 'easeOut' }}
+                                  className="bg-gradient-to-r from-indigo-500 to-violet-500 h-full rounded-full shadow-xs"
+                                />
+                              </div>
+                              <div className="flex justify-between items-center text-[10px] text-slate-500 dark:text-slate-400 font-bold">
+                                <span>{prog.gameMode === 'cutthroat' ? 'Cutthroat' : 'Partnership'}{prog.includeJokers ? ' • Jokers' : ''}</span>
+                                <span className="font-mono text-indigo-600 dark:text-indigo-400 font-extrabold">{prog.percent}%</span>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="my-3 p-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                            <span>Target Goal</span>
+                            <span className="font-mono font-bold text-slate-600 dark:text-slate-400">
+                              {activeHouseRules.spades?.targetScore || 500} pts
+                            </span>
+                          </div>
+                        );
+                      })()}
+
+                      <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                        {savedGames.spades ? (
+                          <>
+                            <button
+                              onClick={() => resumeMatch('spades')}
+                              className="flex-1 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-center gap-1 shadow-sm"
+                            >
+                              <Play className="w-3.5 h-3.5 fill-current" />
+                              Resume
+                            </button>
+                            <button
+                              onClick={() => startNewMatch('spades')}
+                              className="py-2.5 px-3 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-slate-800 text-[11px] font-bold rounded-xl uppercase tracking-wider transition-colors cursor-pointer"
+                            >
+                              New
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHouseRulesTab('spades');
+                                setShowHouseRulesModal(true);
+                              }}
+                              className="p-2.5 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                              title="Customize Spades House Rules"
+                              aria-label="Spades House Rules"
+                            >
+                              <Sliders className="w-4 h-4" />
+                            </button>
+                          </>
+                        ) : (
+                          <div className="w-full flex items-center gap-2">
+                            <button
+                              onClick={() => startNewMatch('spades')}
+                              className="flex-1 py-2.5 text-xs font-black text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 flex items-center justify-between uppercase tracking-wider cursor-pointer group/btn"
+                            >
+                              <span>Start Match</span>
+                              <span className="group-hover/btn:translate-x-1 transition-transform">→</span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHouseRulesTab('spades');
+                                setShowHouseRulesModal(true);
+                              }}
+                              className="p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                              title="Customize Spades House Rules"
+                              aria-label="Spades House Rules"
+                            >
+                              <Sliders className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+
+                  {/* EUCHRE CARD */}
+                  <motion.div variants={launcherCardVariants}>
+                    <div className="bg-white dark:bg-slate-900 border-2 border-emerald-100 dark:border-slate-800 hover:border-emerald-300 dark:hover:border-emerald-500/50 p-6 rounded-[32px] shadow-sm text-left flex flex-col justify-between min-h-[300px] group transition-all hover:shadow-lg hover:ring-4 hover:ring-emerald-400/20 relative overflow-hidden">
+                      {savedGames.euchre && (
+                        <span className="absolute top-4 right-4 bg-emerald-100 dark:bg-emerald-950/80 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 z-10">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          Saved Match
+                        </span>
+                      )}
+                      <div>
+                        <div className="h-20 flex items-center justify-start mb-2 group-hover:scale-105 transition-transform origin-left">
+                          <EuchreLogo size="md" />
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200/70 dark:border-emerald-800">
+                            Partnership &amp; Cutthroat
+                          </span>
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-200/70 dark:border-amber-800">
+                            Right &amp; Left Bowers
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                          Fast hand scorer with Trump &amp; Bower tracker, Going Alone sweeps (+4), Euchre penalties (+2), and 3-player Cutthroat mode.
+                        </p>
+                      </div>
+
+                      {(() => {
+                        const prog = getEuchreProgress(savedGames.euchre);
+                        if (prog) {
+                          return (
+                            <div className="my-3 p-3 bg-emerald-50/80 dark:bg-slate-800/80 rounded-2xl border border-emerald-200/60 dark:border-slate-700/80 space-y-1.5 shadow-xs">
+                              <div className="flex items-center justify-between text-[11px] font-black text-emerald-950 dark:text-emerald-200">
+                                <span className="truncate max-w-[130px] flex items-center gap-1" title={prog.leaderName}>
+                                  <span>🏆</span>
+                                  <span className="truncate">{prog.leaderName}</span>
+                                </span>
+                                <span className="font-mono text-emerald-600 dark:text-emerald-400 font-extrabold">
+                                  {prog.maxScore} / {prog.target} pts
+                                </span>
+                              </div>
+                              <div className="w-full bg-emerald-200/60 dark:bg-slate-700 rounded-full h-2.5 overflow-hidden p-0.5">
+                                <motion.div
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${prog.percent}%` }}
+                                  transition={{ duration: 0.9, ease: 'easeOut' }}
+                                  className="bg-gradient-to-r from-emerald-500 to-teal-500 h-full rounded-full shadow-xs"
+                                />
+                              </div>
+                              <div className="flex justify-between items-center text-[10px] text-slate-500 dark:text-slate-400 font-bold">
+                                <span>{prog.gameMode === 'cutthroat' ? 'Cutthroat' : 'Partnership'}</span>
+                                <span className="font-mono text-emerald-600 dark:text-emerald-400 font-extrabold">{prog.percent}%</span>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="my-3 p-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                            <span>Target Goal</span>
+                            <span className="font-mono font-bold text-slate-600 dark:text-slate-400">
+                              {activeHouseRules.euchre?.targetScore || 10} pts
+                            </span>
+                          </div>
+                        );
+                      })()}
+
+                      <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                        {savedGames.euchre ? (
+                          <>
+                            <button
+                              onClick={() => resumeMatch('euchre')}
+                              className="flex-1 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-center gap-1 shadow-sm"
+                            >
+                              <Play className="w-3.5 h-3.5 fill-current" />
+                              Resume
+                            </button>
+                            <button
+                              onClick={() => startNewMatch('euchre')}
+                              className="py-2.5 px-3 text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-slate-800 text-[11px] font-bold rounded-xl uppercase tracking-wider transition-colors cursor-pointer"
+                            >
+                              New
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHouseRulesTab('euchre');
+                                setShowHouseRulesModal(true);
+                              }}
+                              className="p-2.5 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                              title="Customize Euchre House Rules"
+                              aria-label="Euchre House Rules"
+                            >
+                              <Sliders className="w-4 h-4" />
+                            </button>
+                          </>
+                        ) : (
+                          <div className="w-full flex items-center gap-2">
+                            <button
+                              onClick={() => startNewMatch('euchre')}
+                              className="flex-1 py-2.5 text-xs font-black text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 flex items-center justify-between uppercase tracking-wider cursor-pointer group/btn"
+                            >
+                              <span>Start Match</span>
+                              <span className="group-hover/btn:translate-x-1 transition-transform">→</span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHouseRulesTab('euchre');
+                                setShowHouseRulesModal(true);
+                              }}
+                              className="p-2 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                              title="Customize Euchre House Rules"
+                              aria-label="Euchre House Rules"
+                            >
+                              <Sliders className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
                 </motion.div>
 
 
@@ -1515,6 +1913,52 @@ export default function App() {
                     />
                   </motion.div>
                 )}
+
+                {activeGame === 'spades' && (
+                  <motion.div
+                    key="spades"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                  >
+                    <SpadesScorer
+                      players={players}
+                      onGameFinished={handleGameFinished}
+                      onAddPlayer={handleAddPlayer}
+                      externalGameState={roomExternalGameState}
+                      onSyncGameRoom={handleSyncGameRoom}
+                      isOnlineSynced={!!activeRoom}
+                      houseRules={activeHouseRules.spades}
+                      onOpenHouseRules={() => {
+                        setHouseRulesTab('spades');
+                        setShowHouseRulesModal(true);
+                      }}
+                    />
+                  </motion.div>
+                )}
+
+                {activeGame === 'euchre' && (
+                  <motion.div
+                    key="euchre"
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -15 }}
+                  >
+                    <EuchreScorer
+                      players={players}
+                      onGameFinished={handleGameFinished}
+                      onAddPlayer={handleAddPlayer}
+                      externalGameState={roomExternalGameState}
+                      onSyncGameRoom={handleSyncGameRoom}
+                      isOnlineSynced={!!activeRoom}
+                      houseRules={activeHouseRules.euchre}
+                      onOpenHouseRules={() => {
+                        setHouseRulesTab('euchre');
+                        setShowHouseRulesModal(true);
+                      }}
+                    />
+                  </motion.div>
+                )}
               </AnimatePresence>
             </div>
           </div>
@@ -1622,6 +2066,8 @@ export default function App() {
 
               <button
                 onClick={closeCelebration}
+                data-tv-close="true"
+                data-tv-action="primary"
                 className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-black rounded-full text-sm transition-colors shadow-md cursor-pointer uppercase tracking-wider"
               >
                 Return to Game Lobby
@@ -1680,6 +2126,7 @@ export default function App() {
 
                 <button
                   onClick={() => setShowQuitConfirm(false)}
+                  data-tv-close="true"
                   className="w-full py-2.5 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer"
                 >
                   Cancel, Keep Playing

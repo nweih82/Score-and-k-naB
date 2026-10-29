@@ -632,3 +632,259 @@ export function DominoesLogo({ className = '', size = 'md' }: LogoProps) {
   );
 }
 
+export function SpadesLogo({ className = '', size = 'md' }: LogoProps) {
+  const sizeClasses = {
+    sm: 'h-10',
+    md: 'h-16',
+    lg: 'h-24',
+    xl: 'h-32',
+  };
+
+  return (
+    <div className={`relative inline-flex items-center justify-center select-none ${sizeClasses[size]} ${className}`}>
+      <svg
+        viewBox="0 0 360 175"
+        className="w-auto h-full drop-shadow-lg overflow-visible"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <defs>
+          <filter id="spadesCardShadow" x="-15%" y="-15%" width="135%" height="135%">
+            <feDropShadow dx="0" dy="4" stdDeviation="4" floodColor="#020617" floodOpacity="0.4" />
+          </filter>
+          <linearGradient id="spadeCardFace" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#FFFFFF" />
+            <stop offset="70%" stopColor="#F8FAFC" />
+            <stop offset="100%" stopColor="#E2E8F0" />
+          </linearGradient>
+          <linearGradient id="spadeGoldTrim" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#FDE047" />
+            <stop offset="50%" stopColor="#F59E0B" />
+            <stop offset="100%" stopColor="#B45309" />
+          </linearGradient>
+          <linearGradient id="spadeSuitGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#334155" />
+            <stop offset="50%" stopColor="#0F172A" />
+            <stop offset="100%" stopColor="#020617" />
+          </linearGradient>
+        </defs>
+
+        {/* Ambient indigo/violet glow */}
+        <ellipse cx="180" cy="78" rx="115" ry="56" fill="#6366F1" opacity="0.22" filter="blur(12px)" />
+
+        {/* FANNED PLAYING CARDS */}
+        <g filter="url(#spadesCardShadow)">
+          {/* Left Card: High Joker */}
+          <g transform="translate(96, 14) rotate(-14)">
+            <rect x="0" y="0" width="66" height="96" rx="8" fill="url(#spadeCardFace)" stroke="#CBD5E1" strokeWidth="2" />
+            <rect x="4" y="4" width="58" height="88" rx="5" fill="none" stroke="#F59E0B" strokeWidth="1" strokeDasharray="3 2" />
+            <text x="9" y="18" fill="#D97706" fontFamily="system-ui, sans-serif" fontWeight="900" fontSize="11">★</text>
+            <text x="9" y="28" fill="#7C3AED" fontFamily="system-ui, sans-serif" fontWeight="900" fontSize="8">JOKER</text>
+            <circle cx="33" cy="52" r="14" fill="#F59E0B" opacity="0.15" />
+            <text x="33" y="59" textAnchor="middle" fill="#7C3AED" fontSize="24">🃏</text>
+          </g>
+
+          {/* Center Card: Ace of Spades */}
+          <g transform="translate(147, 5)">
+            <rect x="0" y="0" width="68" height="98" rx="9" fill="url(#spadeCardFace)" stroke="url(#spadeGoldTrim)" strokeWidth="2.5" />
+            <text x="10" y="21" fill="#0F172A" fontFamily="system-ui, 'Arial Black', sans-serif" fontWeight="900" fontSize="15">A</text>
+            <text x="10" y="34" fill="#0F172A" fontSize="13">♠</text>
+            {/* Large ornate center Spade */}
+            <text x="34" y="66" textAnchor="middle" fill="url(#spadeSuitGrad)" fontSize="42">♠</text>
+            <text x="58" y="90" textAnchor="end" fill="#0F172A" fontFamily="system-ui, 'Arial Black', sans-serif" fontWeight="900" fontSize="12">A</text>
+          </g>
+
+          {/* Right Card: 2 of Spades / King of Spades */}
+          <g transform="translate(200, 15) rotate(14)">
+            <rect x="0" y="0" width="66" height="96" rx="8" fill="url(#spadeCardFace)" stroke="#CBD5E1" strokeWidth="2" />
+            <text x="9" y="20" fill="#0F172A" fontFamily="system-ui, 'Arial Black', sans-serif" fontWeight="900" fontSize="14">2</text>
+            <text x="9" y="32" fill="#0F172A" fontSize="12">♠</text>
+            <text x="33" y="60" textAnchor="middle" fill="#1E293B" fontSize="30">♠</text>
+          </g>
+        </g>
+
+        {/* 3D WORDMARK "SPADES" */}
+        <g>
+          <text
+            x="180"
+            y="156"
+            textAnchor="middle"
+            fill="#020617"
+            stroke="#020617"
+            strokeWidth="16"
+            strokeLinejoin="round"
+            fontFamily="Impact, 'Arial Black', 'Outfit', sans-serif"
+            fontSize="62"
+            letterSpacing="1px"
+          >
+            SPADES
+          </text>
+          <text
+            x="180"
+            y="152"
+            textAnchor="middle"
+            fill="#312E81"
+            stroke="#312E81"
+            strokeWidth="13"
+            strokeLinejoin="round"
+            fontFamily="Impact, 'Arial Black', 'Outfit', sans-serif"
+            fontSize="62"
+            letterSpacing="1px"
+          >
+            SPADES
+          </text>
+          <text
+            x="180"
+            y="149"
+            textAnchor="middle"
+            fill="#6366F1"
+            stroke="#6366F1"
+            strokeWidth="7"
+            strokeLinejoin="round"
+            fontFamily="Impact, 'Arial Black', 'Outfit', sans-serif"
+            fontSize="62"
+            letterSpacing="1px"
+          >
+            SPADES
+          </text>
+          <text
+            x="180"
+            y="149"
+            textAnchor="middle"
+            fill="#FFFFFF"
+            stroke="#E0E7FF"
+            strokeWidth="1.5"
+            fontFamily="Impact, 'Arial Black', 'Outfit', sans-serif"
+            fontSize="62"
+            letterSpacing="1px"
+          >
+            SPADES
+          </text>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+export function EuchreLogo({ className = '', size = 'md' }: LogoProps) {
+  const sizeClasses = {
+    sm: 'h-10',
+    md: 'h-16',
+    lg: 'h-24',
+    xl: 'h-32',
+  };
+
+  return (
+    <div className={`relative inline-flex items-center justify-center select-none ${sizeClasses[size]} ${className}`}>
+      <svg
+        viewBox="0 0 360 175"
+        className="w-auto h-full drop-shadow-lg overflow-visible"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <defs>
+          <filter id="euchreCardShadow" x="-15%" y="-15%" width="135%" height="135%">
+            <feDropShadow dx="0" dy="4" stdDeviation="4" floodColor="#020617" floodOpacity="0.4" />
+          </filter>
+          <linearGradient id="euchreCardFace" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#FFFFFF" />
+            <stop offset="70%" stopColor="#FFFBEB" />
+            <stop offset="100%" stopColor="#FEF3C7" />
+          </linearGradient>
+        </defs>
+
+        {/* Ambient emerald/crimson glow */}
+        <ellipse cx="180" cy="78" rx="115" ry="56" fill="#10B981" opacity="0.22" filter="blur(12px)" />
+
+        {/* FANNED BOWER CARDS (Right Bower & Left Bower) */}
+        <g filter="url(#euchreCardShadow)">
+          {/* Left Card: Jack of Diamonds */}
+          <g transform="translate(94, 14) rotate(-14)">
+            <rect x="0" y="0" width="66" height="96" rx="8" fill="url(#euchreCardFace)" stroke="#FCD34D" strokeWidth="2" />
+            <text x="9" y="20" fill="#DC2626" fontFamily="system-ui, 'Arial Black', sans-serif" fontWeight="900" fontSize="14">J</text>
+            <text x="9" y="33" fill="#DC2626" fontSize="13">♦</text>
+            <text x="33" y="62" textAnchor="middle" fill="#DC2626" fontSize="32">♦</text>
+          </g>
+
+          {/* Center Card: Right Bower Jack of Hearts */}
+          <g transform="translate(146, 5)">
+            <rect x="0" y="0" width="68" height="98" rx="9" fill="url(#euchreCardFace)" stroke="#F59E0B" strokeWidth="2.5" />
+            <text x="9" y="21" fill="#DC2626" fontFamily="system-ui, 'Arial Black', sans-serif" fontWeight="900" fontSize="15">J</text>
+            <text x="9" y="34" fill="#DC2626" fontSize="13">♥</text>
+            <text x="34" y="64" textAnchor="middle" fill="#DC2626" fontSize="38">♥</text>
+            <text x="34" y="86" textAnchor="middle" fill="#B45309" fontFamily="system-ui, sans-serif" fontWeight="900" fontSize="7.5" letterSpacing="0.5px">BOWER</text>
+          </g>
+
+          {/* Right Card: Jack of Spades */}
+          <g transform="translate(200, 15) rotate(14)">
+            <rect x="0" y="0" width="66" height="96" rx="8" fill="url(#euchreCardFace)" stroke="#FCD34D" strokeWidth="2" />
+            <text x="9" y="20" fill="#0F172A" fontFamily="system-ui, 'Arial Black', sans-serif" fontWeight="900" fontSize="14">J</text>
+            <text x="9" y="33" fill="#0F172A" fontSize="13">♠</text>
+            <text x="33" y="62" textAnchor="middle" fill="#0F172A" fontSize="32">♠</text>
+          </g>
+        </g>
+
+        {/* 3D WORDMARK "EUCHRE" */}
+        <g>
+          <text
+            x="180"
+            y="156"
+            textAnchor="middle"
+            fill="#020617"
+            stroke="#020617"
+            strokeWidth="16"
+            strokeLinejoin="round"
+            fontFamily="Impact, 'Arial Black', 'Outfit', sans-serif"
+            fontSize="62"
+            letterSpacing="1px"
+          >
+            EUCHRE
+          </text>
+          <text
+            x="180"
+            y="152"
+            textAnchor="middle"
+            fill="#064E3B"
+            stroke="#064E3B"
+            strokeWidth="13"
+            strokeLinejoin="round"
+            fontFamily="Impact, 'Arial Black', 'Outfit', sans-serif"
+            fontSize="62"
+            letterSpacing="1px"
+          >
+            EUCHRE
+          </text>
+          <text
+            x="180"
+            y="149"
+            textAnchor="middle"
+            fill="#10B981"
+            stroke="#10B981"
+            strokeWidth="7"
+            strokeLinejoin="round"
+            fontFamily="Impact, 'Arial Black', 'Outfit', sans-serif"
+            fontSize="62"
+            letterSpacing="1px"
+          >
+            EUCHRE
+          </text>
+          <text
+            x="180"
+            y="149"
+            textAnchor="middle"
+            fill="#FFFFFF"
+            stroke="#D1FAE5"
+            strokeWidth="1.5"
+            fontFamily="Impact, 'Arial Black', 'Outfit', sans-serif"
+            fontSize="62"
+            letterSpacing="1px"
+          >
+            EUCHRE
+          </text>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+

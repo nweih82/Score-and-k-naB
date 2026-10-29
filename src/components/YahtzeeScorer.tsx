@@ -828,6 +828,7 @@ export default function YahtzeeScorer({
           <button
             onClick={startNewGame}
             disabled={selectedPlayers.length === 0}
+            data-tv-action="primary"
             className="w-full py-3.5 yz-accent-bg hover:opacity-90 disabled:opacity-50 text-white font-black rounded-full text-sm flex items-center justify-center gap-2 transition-colors shadow-md cursor-pointer uppercase tracking-wider"
           >
             <Play className="w-4 h-4 fill-current" />
@@ -968,6 +969,7 @@ export default function YahtzeeScorer({
           {onOpenHouseRules && (
             <button
               onClick={onOpenHouseRules}
+              data-tv-action="rules"
               className="px-3.5 py-2 yz-themed-header border yz-row-border hover:opacity-80 yz-primary-text font-black rounded-full text-xs flex items-center gap-1.5 transition-colors cursor-pointer uppercase tracking-wider"
               title="View or modify Yahtzee House Rules"
             >
@@ -979,6 +981,7 @@ export default function YahtzeeScorer({
           <button
             onClick={handleUndo}
             disabled={historyStack.length === 0}
+            data-tv-action="undo"
             className="px-3.5 py-2 yz-accent-bg hover:opacity-90 disabled:opacity-40 text-white font-black rounded-full text-xs flex items-center gap-1.5 transition-colors cursor-pointer uppercase tracking-wider shadow-xs ml-auto sm:ml-0"
             title="Undo last score entry"
           >
@@ -987,6 +990,7 @@ export default function YahtzeeScorer({
           </button>
           <button
             onClick={resetGame}
+            data-tv-action="danger"
             className="px-4 py-2 border-2 yz-row-border yz-themed-header hover:opacity-80 yz-primary-text font-black rounded-full text-xs flex items-center gap-1 transition-colors cursor-pointer uppercase tracking-wider"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -1094,10 +1098,22 @@ export default function YahtzeeScorer({
                   return (
                     <th
                       key={player.id}
+                      tabIndex={0}
+                      role="button"
+                      aria-label={`Select ${player.name}'s turn`}
                       onClick={() => {
                         if (!isActive) {
                           pushStateToHistory();
                           setGameState(prev => prev ? { ...prev, activePlayerId: player.id } : null);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          if (!isActive) {
+                            pushStateToHistory();
+                            setGameState(prev => prev ? { ...prev, activePlayerId: player.id } : null);
+                          }
                         }
                       }}
                       className={`p-4 text-center w-[120px] transition-all relative cursor-pointer select-none group/th ${
@@ -1166,7 +1182,16 @@ export default function YahtzeeScorer({
                           return (
                             <td
                               key={player.id}
+                              tabIndex={0}
+                              role="button"
+                              aria-label={`${player.name} ${cat.label}: ${typeof val === 'number' && !isNaN(val) ? val + ' points' : 'Empty, press OK to score'}`}
                               onClick={() => handleCellClick(player.id, cat.key)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  handleCellClick(player.id, cat.key);
+                                }
+                              }}
                               className={`p-3 text-center cursor-pointer transition-all ${
                                 isActive ? 'yz-active-column' : ''
                               }`}
@@ -1245,7 +1270,16 @@ export default function YahtzeeScorer({
                           return (
                             <td
                               key={player.id}
+                              tabIndex={0}
+                              role="button"
+                              aria-label={`${player.name} ${cat.label}: ${typeof val === 'number' && !isNaN(val) ? val + ' points' : 'Empty, press OK to score'}`}
                               onClick={() => handleCellClick(player.id, cat.key)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  handleCellClick(player.id, cat.key);
+                                }
+                              }}
                               className={`p-3 text-center cursor-pointer transition-all ${
                                 isActive ? 'yz-active-column' : ''
                               }`}

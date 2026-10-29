@@ -212,9 +212,9 @@ export function subscribeToPlayers(userId: string, onUpdate: (players: Player[])
         const data = doc.data();
         return {
           id: data.id || doc.id,
-          name: data.name,
-          color: data.color,
-          avatar: data.avatar,
+          name: data.name || 'Player',
+          color: data.color || 'bg-rose-500 text-white',
+          avatar: data.avatar || '🎲',
         };
       });
       onUpdate(playerList);
@@ -316,6 +316,8 @@ export function subscribeToSavedGames(
     farkle?: SavedGameData | null;
     yahtzee?: SavedGameData | null;
     dominoes?: SavedGameData | null;
+    spades?: SavedGameData | null;
+    euchre?: SavedGameData | null;
   }) => void
 ) {
   const savedRef = collection(db, 'users', userId, 'savedGames');
@@ -326,12 +328,14 @@ export function subscribeToSavedGames(
         farkle?: SavedGameData | null;
         yahtzee?: SavedGameData | null;
         dominoes?: SavedGameData | null;
+        spades?: SavedGameData | null;
+        euchre?: SavedGameData | null;
       } = {};
 
       snapshot.docs.forEach(docSnap => {
         const data = docSnap.data();
         const gt = docSnap.id as GameType;
-        if (gt === 'farkle' || gt === 'yahtzee' || gt === 'dominoes') {
+        if (gt === 'farkle' || gt === 'yahtzee' || gt === 'dominoes' || gt === 'spades' || gt === 'euchre') {
           result[gt] = {
             gameType: data.gameType,
             gameState: data.gameState,
@@ -358,7 +362,7 @@ export async function saveActiveGameToFirestore(
   try {
     await setDoc(doc(db, 'users', userId, 'savedGames', gameType), {
       gameType: data.gameType,
-      gameState: data.gameState,
+      gameState: safeClone(data.gameState),
       turnScore: data.turnScore ?? null,
       updatedAt: data.updatedAt,
       userId,
@@ -431,6 +435,63 @@ export function createDefaultGameStateForRoom(gameType: GameType, initialPlayers
     };
   }
 
+  if (gameType === 'spades') {
+    const scores: Record<string, number> = {};
+    const bags: Record<string, number> = {};
+    players.forEach(p => {
+      scores[p.id] = 0;
+      bags[p.id] = 0;
+    });
+    return {
+      players,
+      gameMode: 'cutthroat',
+      includeJokers: false,
+      totalTricksPerHand: 13,
+      scores,
+      bags,
+      rounds: [],
+      currentRound: 1,
+      dealerIndex: 0,
+      targetScore: 500,
+      winnerId: null,
+      activePlayerId: players[0].id,
+      rules: {
+        targetScore: 500,
+        gameMode: 'cutthroat',
+        includeJokers: false,
+        nilBonus: 100,
+        blindNilBonus: 200,
+        bagPenalty: 100,
+        bagThreshold: 10,
+        minBid: 1,
+      },
+    };
+  }
+
+  if (gameType === 'euchre') {
+    const scores: Record<string, number> = {};
+    players.forEach(p => { scores[p.id] = 0; });
+    return {
+      players,
+      gameMode: 'cutthroat',
+      scores,
+      rounds: [],
+      currentHand: 1,
+      dealerIndex: 0,
+      targetScore: 10,
+      winnerId: null,
+      activePlayerId: players[0].id,
+      rules: {
+        targetScore: 10,
+        gameMode: 'cutthroat',
+        aloneMarchPoints: 4,
+        euchrePoints: 2,
+        stickTheDealer: true,
+        bennyJoker: false,
+      },
+    };
+  }
+
   return null;
 }
 
@@ -483,7 +544,7 @@ export async function createGameRoomInFirestore(
   const roomData: GameRoomData = {
     code: normalizedCode,
     gameType,
-    gameState: initialGameState,
+    gameState: safeClone(initialGameState),
     turnScore: turnScore ?? null,
     hostId,
     hostName: hostName || host.name || 'Host',
@@ -665,7 +726,7 @@ export async function updateGameRoomStateInFirestore(
 
   try {
     await updateDoc(doc(db, 'rooms', normalizedCode), {
-      gameState,
+      gameState: safeClone(gameState),
       turnScore: turnScore ?? null,
       lastActionBy: actionBy || 'Score updated',
       updatedAt: new Date().toISOString(),

@@ -20,11 +20,15 @@ interface PlayerStat {
     farkle: number;
     yahtzee: number;
     dominoes: number;
+    spades: number;
+    euchre: number;
   };
   gamesByGame: {
     farkle: number;
     yahtzee: number;
     dominoes: number;
+    spades: number;
+    euchre: number;
   };
 }
 
@@ -91,12 +95,16 @@ export default function PlayerStatistics({ players, gameHistory }: PlayerStatist
       farkle: 0,
       yahtzee: 0,
       dominoes: 0,
+      spades: 0,
+      euchre: 0,
     };
 
     const gamesByGame = {
       farkle: 0,
       yahtzee: 0,
       dominoes: 0,
+      spades: 0,
+      euchre: 0,
     };
 
     playerEntries.forEach(entry => {
@@ -168,6 +176,8 @@ export default function PlayerStatistics({ players, gameHistory }: PlayerStatist
     if (type === 'farkle') return 'Farkle';
     if (type === 'yahtzee') return 'Yahtzee';
     if (type === 'dominoes') return 'Dominoes';
+    if (type === 'spades') return 'Spades';
+    if (type === 'euchre') return 'Euchre';
     return type;
   };
 
@@ -175,6 +185,8 @@ export default function PlayerStatistics({ players, gameHistory }: PlayerStatist
     if (type === 'farkle') return <Flame className="w-3.5 h-3.5 text-orange-500" />;
     if (type === 'yahtzee') return <Sparkles className="w-3.5 h-3.5 text-teal-500" />;
     if (type === 'dominoes') return <ScrollText className="w-3.5 h-3.5 text-pink-500" />;
+    if (type === 'spades') return <span className="text-xs leading-none text-indigo-500">♠</span>;
+    if (type === 'euchre') return <span className="text-xs leading-none text-emerald-500">♣</span>;
     return null;
   };
 
@@ -195,8 +207,8 @@ export default function PlayerStatistics({ players, gameHistory }: PlayerStatist
         {/* CONTROLS: SORT & GAME FILTER */}
         <div className="flex flex-wrap items-center gap-2">
           {/* Filter by Game */}
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-full p-1 text-xs font-bold">
-            {(['all', 'farkle', 'yahtzee', 'dominoes'] as const).map(type => (
+          <div className="flex flex-wrap items-center bg-slate-100 dark:bg-slate-800 rounded-full p-1 text-xs font-bold">
+            {(['all', 'farkle', 'yahtzee', 'dominoes', 'spades', 'euchre'] as const).map(type => (
               <button
                 key={type}
                 onClick={() => setGameFilter(type)}
@@ -417,6 +429,32 @@ export default function PlayerStatistics({ players, gameHistory }: PlayerStatist
                     {stat.highScoreByGame.dominoes > 0 && (
                       <span className="text-[10px] text-pink-700 dark:text-pink-400 font-semibold">
                         (Best: {stat.highScoreByGame.dominoes.toLocaleString()})
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 bg-indigo-50/80 dark:bg-indigo-950/40 px-2.5 py-1 rounded-xl border border-indigo-100 dark:border-indigo-900/50">
+                    <span className="text-xs text-indigo-600 dark:text-indigo-400">♠</span>
+                    <span className="font-bold text-slate-700 dark:text-slate-200">Spades:</span>
+                    <span className="font-mono font-black text-indigo-950 dark:text-indigo-200">
+                      {stat.gamesByGame.spades} gms
+                    </span>
+                    {stat.highScoreByGame.spades > 0 && (
+                      <span className="text-[10px] text-indigo-700 dark:text-indigo-400 font-semibold">
+                        (Best: {stat.highScoreByGame.spades.toLocaleString()})
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 bg-emerald-50/80 dark:bg-emerald-950/40 px-2.5 py-1 rounded-xl border border-emerald-100 dark:border-emerald-900/50">
+                    <span className="text-xs text-emerald-600 dark:text-emerald-400">♣</span>
+                    <span className="font-bold text-slate-700 dark:text-slate-200">Euchre:</span>
+                    <span className="font-mono font-black text-emerald-950 dark:text-emerald-200">
+                      {stat.gamesByGame.euchre} gms
+                    </span>
+                    {stat.highScoreByGame.euchre > 0 && (
+                      <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">
+                        (Best: {stat.highScoreByGame.euchre.toLocaleString()})
                       </span>
                     )}
                   </div>
